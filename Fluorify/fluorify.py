@@ -3,6 +3,7 @@
 from .energy import FSim
 from .mol2 import Mol2, MutatedLigand
 from .optimize import Optimize
+from .molecule import Mutants
 
 import os
 import time
@@ -63,8 +64,7 @@ class Fluorify(object):
                              'Charges will not be applied where expected')
 
         input_files = input_files[1:3]
-        complex_offset, solvent_offset = get_ligand_offset(input_files, self.mol2_ligand_atoms, ligand_name)
-
+        self.complex_offset, self.solvent_offset = get_ligand_offset(input_files, self.mol2_ligand_atoms, ligand_name)
         logger.debug('Parametrize wild type ligand...')
         wt_ligand = MutatedLigand(file_path=self.output_folder, mol_name=mol_name,
                                   net_charge=self.net_charge, gaff=self.gaff_ver)
@@ -73,7 +73,7 @@ class Fluorify(object):
         #COMPLEX
         self.complex_sys = []
         self.complex_sys.append(FSim(ligand_name=ligand_name, sim_name=complex_name, input_folder=input_folder,
-                                     charge_only=charge_only, num_gpu=num_gpu, offset=complex_offset, opt=opt))
+                                     charge_only=charge_only, num_gpu=num_gpu, offset=self.complex_offset, opt=opt))
         self.complex_sys.append([complex_sim_dir + complex_name + '.dcd'])
         self.complex_sys.append(complex_sim_dir + complex_name + '.pdb')
         if not os.path.isfile(self.complex_sys[1][0]):
@@ -86,7 +86,7 @@ class Fluorify(object):
         #SOLVENT
         self.solvent_sys = []
         self.solvent_sys.append(FSim(ligand_name=ligand_name, sim_name=solvent_name, input_folder=input_folder,
-                                     charge_only=charge_only, num_gpu=num_gpu, offset=solvent_offset, opt=opt))
+                                     charge_only=charge_only, num_gpu=num_gpu, offset=self.solvent_offset, opt=opt))
         self.solvent_sys.append([solvent_sim_dir + solvent_name + '.dcd'])
         self.solvent_sys.append(solvent_sim_dir + solvent_name + '.pdb')
         if not os.path.isfile(self.solvent_sys[1][0]):
@@ -133,34 +133,24 @@ class Fluorify(object):
             mute = mutations[i]['subtract']
             mutant_parameters.append(ligand.get_parameters(mute))
 
-        wt_nonbonded_params = [[x for x in wt_parameters[0]]]
-        mutant_nonbonded_parmas = [x[0] for x in mutant_parameters]
+        #last entry of mutant is wildtype
+        mutant_parameters.append(wt_parameters)
+        mutations.append({'add': [], 'subtract': [], 'replace': [None]})
 
-        wt_bonded = [[x for x in wt_parameters[1]]]
-        mutant_bonded_parmas = [x[1] for x in mutant_parameters]
+        atom_order = [self.complex_sys[0].ligand_atoms, self.solvent_sys[0].ligand_atoms]
+        virt_atoms = [self.complex_sys[0].virt_order, self.solvent_sys[0].virt_order]
+        bond_order = [self.complex_sys[0].bond_list, self.solvent_sys[0].bond_list]
+        exception_order = [self.complex_sys[0].exceptions_list, self.solvent_sys[0].exceptions_list]
+        virt_exceptions = [self.complex_sys[0].exceptions, self.solvent_sys[0].exceptions]
 
-        complex_ghost = self.complex_sys[0].get_virtual_order()
-        solvent_ghost = self.solvent_sys[0].get_virtual_order()
-        if complex_ghost != solvent_ghost:
-            raise ValueError('Ghost topologies are not matched across inputs')
+        sys_offset = [self.complex_sys[0].offset, self.solvent_sys[0].offset]
+        virtual_offset = [self.complex_sys[0].virtual_shift, self.solvent_sys[0].virtual_shift]
 
-        # Build ghosts
-        wt_ghosts = [[0.0*e, 0.26*unit.nanometer, 0.0*unit.kilojoules_per_mole] for i in range(len(complex_ghost))]
-        wt_ghosts = [copy.deepcopy(wt_ghosts) for i in range(len(mutant_nonbonded_parmas))]
-        mutant_ghosts = copy.deepcopy(wt_ghosts)
+        mutant_params = Mutants(mutant_parameters, atom_order, virt_atoms, bond_order,
+                                exception_order, virt_exceptions, mutations, sys_offset, virtual_offset)
 
-        # Build ghost mutants
-        for param, mutant, ghost in zip(mutant_nonbonded_parmas, mutations, mutant_ghosts):
-            atom_idxs = mutant['replace']
-            for atom in atom_idxs:
-                atom = int(atom-1)
-                transfer_params = copy.deepcopy(list(param[atom]))
-                param[atom] = [0.0*e, 0.26*unit.nanometer, 0.0*unit.kilojoules_per_mole]
-                transfer_index = complex_ghost.index(atom)
-                ghost[transfer_index] = transfer_params
-
-        mutant_parameters = [[x, y, z] for x, y, z in zip(mutant_nonbonded_parmas, mutant_ghosts, mutant_bonded_parmas)]
-        wt_parameters = [[x, y, z] for x, y, z in zip(wt_nonbonded_params, wt_ghosts, wt_bonded)]
+        mutant_solvent_params = mutant_params.get_solvent_mutants()
+        mutant_complex_params = mutant_params.get_complex_mutants()
 
         t1 = time.time()
         logger.debug('Took {} seconds'.format(t1 - t0))
@@ -173,13 +163,13 @@ class Fluorify(object):
         logger.debug('Calculating free energies...')
         t0 = time.time()
 
+        logger.debug('Computing solvent potential energies...')
+        solvent_free_energy = FSim.treat_phase(self.solvent_sys[0], wt_parameters, mutant_solvent_params,
+                                               self.solvent_sys[1], self.solvent_sys[2], self.num_frames)
         logger.debug('Computing complex potential energies...')
         #harmonic parameters have no effect on geometery here as dynamics are pre-computed
-        complex_free_energy = FSim.treat_phase(self.complex_sys[0], wt_parameters, mutant_parameters,
+        complex_free_energy = FSim.treat_phase(self.complex_sys[0], wt_parameters, mutant_complex_params,
                                                self.complex_sys[1], self.complex_sys[2], self.num_frames)
-        logger.debug('Computing solvent potential energies...')
-        solvent_free_energy = FSim.treat_phase(self.solvent_sys[0], wt_parameters, mutant_parameters,
-                                               self.solvent_sys[1], self.solvent_sys[2], self.num_frames)
 
         #RESULT
         best_mutants = []
@@ -463,6 +453,15 @@ def get_ligand_offset(input_files, mol2_ligand_atoms, ligand_name):
         snapshot = md.load(file)
         offset.append(snapshot.topology.select('resname {} and name {}'.format(ligand_name, mol2_ligand_atoms[0])))
     return tuple(offset)
+
+def exception_sorting(val):
+    return val[1], val[2]
+
+def reorder_exceptions(exceptions):
+    for sys in exceptions:
+        sys.sort(key=exception_sorting)
+    return exceptions
+
 
 
 def get_atom_list(input_files, resname):

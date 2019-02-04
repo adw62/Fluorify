@@ -236,6 +236,7 @@ class MutatedLigand(object):
         nonbonded_parameters = []
         bonded_parameters = []
         constraint_parameters = []
+        exclusion_parameters = []
         for force in system.getForces():
             if isinstance(force, mm.NonbondedForce):
                 nonbonded_force = force
@@ -243,27 +244,23 @@ class MutatedLigand(object):
                 harmonic_force = force
         #nonbonded
         for index in range(system.getNumParticles()):
-            if index in atoms_to_mute:
-                charge, sigma, epsilon = nonbonded_force.getParticleParameters(index)
-                nonbonded_parameters.append([0.0*charge, 1.0*unit.angstrom, epsilon*0.0])
-                if index + 1 in atoms_to_mute:
-                    nonbonded_parameters.append([0.0*charge, 1.0*unit.angstrom, epsilon*0.0])
-                    if index + 2 in atoms_to_mute:
-                        raise ValueError('Work in progress: Too many pyridinations per mutant')
-                nonbonded_parameters.append([charge, sigma, epsilon])
-            else:
-                charge, sigma, epsilon = nonbonded_force.getParticleParameters(index)
-                nonbonded_parameters.append([charge, sigma, epsilon])
+            charge, sigma, epsilon = nonbonded_force.getParticleParameters(index)
+            nonbonded_parameters.append({"id": index, "data": [charge, sigma, epsilon]})
         #harmonic
         for index in range(harmonic_force.getNumBonds()):
             i, j, r, k = harmonic_force.getBondParameters(index)
-            bonded_parameters.append([index, i, j, r, k])
+            bonded_parameters.append({"id": frozenset((i, j)), "data": [r, k]})
         #constraints
         for index in range(system.getNumConstraints()):
             i, j, r = system.getConstraintParameters(index)
-            constraint_parameters.append([index, i, j, r])
+            constraint_parameters.append({"id": frozenset((i, j)), "data": [r]})
+        #exsclusions
+        for index in range(nonbonded_force.getNumExceptions()):
+            [i, j, chargeprod, sigma, epsilon] = nonbonded_force.getExceptionParameters(index)
+            exclusion_parameters.append({"id": frozenset((i, j)), "data": [chargeprod, sigma, epsilon, True]})
 
-        return [np.asarray(nonbonded_parameters), np.asarray(bonded_parameters), np.asarray(constraint_parameters)]
+        return [nonbonded_parameters, bonded_parameters,
+                constraint_parameters, exclusion_parameters]
 
 
 def run_ante(file_path, file_name, name, net_charge, gaff):
