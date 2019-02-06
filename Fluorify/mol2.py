@@ -234,33 +234,35 @@ class MutatedLigand(object):
         #atoms to mute does not work if there are more than 2 sequential atoms to mute
         system = self.system
         nonbonded_parameters = []
-        bonded_parameters = []
-        constraint_parameters = []
         exclusion_parameters = []
+        bonded_parameters = []
+        torsion_parameters = []
         for force in system.getForces():
             if isinstance(force, mm.NonbondedForce):
                 nonbonded_force = force
             if isinstance(force, mm.HarmonicBondForce):
                 harmonic_force = force
+            if isinstance(force, mm.PeriodicTorsionForce):
+                torsion_force = force
         #nonbonded
         for index in range(system.getNumParticles()):
             charge, sigma, epsilon = nonbonded_force.getParticleParameters(index)
             nonbonded_parameters.append({"id": index, "data": [charge, sigma, epsilon]})
-        #harmonic
-        for index in range(harmonic_force.getNumBonds()):
-            i, j, r, k = harmonic_force.getBondParameters(index)
-            bonded_parameters.append({"id": frozenset((i, j)), "data": [r, k]})
-        #constraints
-        for index in range(system.getNumConstraints()):
-            i, j, r = system.getConstraintParameters(index)
-            constraint_parameters.append({"id": frozenset((i, j)), "data": [r]})
         #exsclusions
         for index in range(nonbonded_force.getNumExceptions()):
-            [i, j, chargeprod, sigma, epsilon] = nonbonded_force.getExceptionParameters(index)
-            exclusion_parameters.append({"id": frozenset((i, j)), "data": [chargeprod, sigma, epsilon, True]})
+            [p1, p2, chargeprod, sigma, epsilon] = nonbonded_force.getExceptionParameters(index)
+            exclusion_parameters.append({"id": frozenset((p1, p2)), "data": [chargeprod, sigma, epsilon, True]})
+        #harmonic
+        for index in range(harmonic_force.getNumBonds()):
+            p1, p2, r, k = harmonic_force.getBondParameters(index)
+            bonded_parameters.append({"id": frozenset((p1, p2)), "data": [r, k]})
+        #torsions
+        for index in range(torsion_force.getNumTorsions()):
+            p1, p2, p3, p4, period, phase, k = torsion_force.getTorsionParameters(index)
+            torsion_parameters.append({"id": frozenset((p1, p2, p3, p4)), "data": [period, phase, k]})
 
-        return [nonbonded_parameters, bonded_parameters,
-                constraint_parameters, exclusion_parameters]
+        return [nonbonded_parameters, exclusion_parameters,
+                bonded_parameters, torsion_parameters]
 
 
 def run_ante(file_path, file_name, name, net_charge, gaff):

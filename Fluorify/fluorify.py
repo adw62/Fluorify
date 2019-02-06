@@ -137,20 +137,7 @@ class Fluorify(object):
         mutant_parameters.append(wt_parameters)
         mutations.append({'add': [], 'subtract': [], 'replace': [None]})
 
-        atom_order = [self.complex_sys[0].ligand_atoms, self.solvent_sys[0].ligand_atoms]
-        virt_atoms = [self.complex_sys[0].virt_order, self.solvent_sys[0].virt_order]
-        bond_order = [self.complex_sys[0].bond_list, self.solvent_sys[0].bond_list]
-        exception_order = [self.complex_sys[0].exceptions_list, self.solvent_sys[0].exceptions_list]
-        virt_exceptions = [self.complex_sys[0].exceptions, self.solvent_sys[0].exceptions]
-
-        sys_offset = [self.complex_sys[0].offset, self.solvent_sys[0].offset]
-        virtual_offset = [self.complex_sys[0].virtual_shift, self.solvent_sys[0].virtual_shift]
-
-        mutant_params = Mutants(mutant_parameters, atom_order, virt_atoms, bond_order,
-                                exception_order, virt_exceptions, mutations, sys_offset, virtual_offset)
-
-        mutant_solvent_params = mutant_params.get_solvent_mutants()
-        mutant_complex_params = mutant_params.get_complex_mutants()
+        mutant_params = Mutants(mutant_parameters, mutations, self.complex_sys[0], self.solvent_sys[0])
 
         t1 = time.time()
         logger.debug('Took {} seconds'.format(t1 - t0))
@@ -164,12 +151,11 @@ class Fluorify(object):
         t0 = time.time()
 
         logger.debug('Computing solvent potential energies...')
-        solvent_free_energy = FSim.treat_phase(self.solvent_sys[0], wt_parameters, mutant_solvent_params,
+        solvent_free_energy = FSim.treat_phase(self.solvent_sys[0], mutant_params.solvent_params,
                                                self.solvent_sys[1], self.solvent_sys[2], self.num_frames)
         logger.debug('Computing complex potential energies...')
-        #harmonic parameters have no effect on geometery here as dynamics are pre-computed
-        complex_free_energy = FSim.treat_phase(self.complex_sys[0], wt_parameters, mutant_complex_params,
-                                               self.complex_sys[1], self.complex_sys[2], self.num_frames)
+        complex_free_energy = FSim.treat_phase(self.complex_sys[0], mutant_params.complex_params, self.complex_sys[1],
+                                               self.complex_sys[2], self.num_frames)
 
         #RESULT
         best_mutants = []
