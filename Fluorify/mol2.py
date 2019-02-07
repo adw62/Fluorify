@@ -251,7 +251,7 @@ class MutatedLigand(object):
         #exsclusions
         for index in range(nonbonded_force.getNumExceptions()):
             [p1, p2, chargeprod, sigma, epsilon] = nonbonded_force.getExceptionParameters(index)
-            exclusion_parameters.append({"id": frozenset((p1, p2)), "data": [chargeprod, sigma, epsilon, True]})
+            exclusion_parameters.append({"id": frozenset((p1, p2)), "data": [chargeprod, sigma, epsilon]})
         #harmonic
         for index in range(harmonic_force.getNumBonds()):
             p1, p2, r, k = harmonic_force.getBondParameters(index)

@@ -179,16 +179,16 @@ class Fluorify(object):
         if fep:
             logger.debug('Calculating FEP for {} best mutants...'.format(x_best))
             t0 = time.time()
-            lambdas = np.linspace(0.0, 1.0, 10)
             for x in range(x_best):
-                complex_dg = self.complex_sys[0].run_parallel_fep(mutant_params, 0, best_mutants[x][2],
-                                                                  20000, 50, lambdas)
-                solvent_dg = self.solvent_sys[0].run_parallel_fep(mutant_params, 1, best_mutants[x][2],
-                                                                  20000, 50, lambdas)
+                complex_dg, complex_error = self.complex_sys[0].run_parallel_fep(mutant_params, 0, best_mutants[x][2],
+                                                                  20000, 50, 10)
+                solvent_dg, solvent_error = self.solvent_sys[0].run_parallel_fep(mutant_params, 1, best_mutants[x][2],
+                                                                  20000, 50, 10)
                 ddg_fep = complex_dg - solvent_dg
+                ddg_error = (complex_error**2+solvent_error**2)**0.5
                 logger.debug('Mutant {}:'.format(best_mutants[x][1]))
                 logger.debug('ddG Fluorine Scanning = {}'.format(best_mutants[x][0]))
-                logger.debug('ddG FEP = {}'.format(ddg_fep))
+                logger.debug('ddG FEP = {} +- {}'.format(ddg_fep, ddg_error))
             t1 = time.time()
             logger.debug('Took {} seconds'.format(t1 - t0))
 

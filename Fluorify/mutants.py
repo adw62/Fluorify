@@ -5,11 +5,16 @@ import time
 from simtk import unit
 import logging
 import copy
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
 #CONSTANTS
 e = unit.elementary_charges
+ee = e*e
+nm = unit.nanometer
+kj_mol = unit.kilojoules_per_mole
+
 
 class Mutants(object):
     def __init__(self, params, mutations, complex_sys, solvent_sys):
@@ -72,7 +77,7 @@ class Mutants(object):
                         atom = int(atom-1)
                         transfer_params = copy.deepcopy(mutant_params[atom])
                         transfer_params = transfer_params['data']
-                        mutant_params[atom] = {'id': atom, 'data': [0.0*e, 0.26*unit.nanometer, 0.0*unit.kilojoules_per_mole]}
+                        mutant_params[atom] = {'id': atom, 'data': [0.0*e, 0.26*nm, 0.0*kj_mol]}
                         transfer_index = sys_virt_atoms.index(atom)
                         virt_id = nonbonded_ghosts[i][j][transfer_index]['id']
                         nonbonded_ghosts[i][j][transfer_index] = {'id': virt_id, 'data': transfer_params}
@@ -111,9 +116,7 @@ class Mutants(object):
                 map = {x['id']: x for x in mutant_parmas}
                 exception_ghosts[i][j] = [map[frozenset(int(x-sys_offset) for x in atom)] for atom in sys_virt_order]
 
-        zero = exception_params[0][0][0]['data']
-        zero = [zero[0]*0.0, zero[1]*0.1, zero[2]*0.0]
-
+        zero = [0.0*ee, 0.1*nm, 0.0*kj_mol]
         # zero flourines in original topology aka exception params
         for i, sys_exception_params in enumerate(exception_params):
             for j, (mutant_parmas, mutant) in enumerate(zip(sys_exception_params, mutations)):
@@ -161,67 +164,43 @@ class Mutants(object):
                 torsion_params[i].append(sys_torsion_params[j])
         return torsion_params
 
-    def build_fep_systems(self, system_idx, mutant_idx, lambdas, opt, charge_only):
-        print(self.all_systems_params[system_idx][mutant_idx])
-        print(self.all_systems_params[system_idx][-1])
-        if opt:
-            wt_nonbonded = 2
-            mutant_nonbonded = mutant_parameters
-        else:
-            wt_nonbonded = wt_parameters[0][0]
-            mutant_nonbonded = mutant_parameters[0]
-            wt_ghost = wt_parameters[0][1]
-            mutant_ghost = mutant_parameters[1]
-            wt_bonded = wt_parameters[0][2]
-            mutant_bonded = mutant_parameters[2]
+    def build_fep_systems(self, system_idx, mutant_idx, windows, opt, charge_only):
+        #build interpolated params
+        interpolated_params = []
+        for wt_force, mut_force in zip(self.all_systems_params[system_idx][-1], self.all_systems_params[system_idx][mutant_idx]):
+            tmp = [[unit_linspace(x['data'][i], y['data'][i], windows) for i in range(len(x['data']))] for x, y in zip(wt_force, mut_force)]
+            tmp = [[[x[i][j] for i in range(len(x))] for x in tmp] for j in range(windows)]
+            interpolated_params.append(tmp)
 
-        nonbonded_mutant_systems = []
-        ghost_mutant_systems = []
-        bonded_mutant_systems = []
+        #add back in ids
+        for i, (force1, force2) in enumerate(zip(self.all_systems_params[system_idx][-1], interpolated_params)):
+            for j, mutant in enumerate(force2):
+                for k, (param1, param2) in enumerate(zip(force1, mutant)):
+                    interpolated_params[i][j][k] = copy.deepcopy(param1)
+                    interpolated_params[i][j][k]['data'] = param2
 
-        # Build parmeters*lambda_schedule
-        if charge_only:
-            if opt:
-                # nonbonded
-                param_diff = [[x[0] - y[0]] for x, y in zip(wt_nonbonded, mutant_nonbonded)]
-                for lam in lambdas:
-                    nonbonded_mutant_systems.append([[-x[0] * lam + y[0]] for x, y in zip(param_diff, wt_nonbonded)])
-                mutant_systems = [[[x, []], []] for x in nonbonded_mutant_systems]
-            else:
-                # nonbonded
-                param_diff = [[x[0] - y[0]] for x, y in zip(wt_nonbonded, mutant_nonbonded)]
-                for lam in lambdas:
-                    nonbonded_mutant_systems.append([[-x[0] * lam + y[0]] for x, y in zip(param_diff, wt_nonbonded)])
-                # ghost
-                param_diff = [[x[0] - y[0]] for x, y in zip(wt_ghost, mutant_ghost)]
-                for lam in lambdas:
-                    ghost_mutant_systems.append([[-x[0] * lam + y[0]] for x, y in zip(param_diff, wt_ghost)])
-                mutant_systems = [[[x, y], []] for x, y in zip(nonbonded_mutant_systems, ghost_mutant_systems)]
-        else:
-            if opt:
-                # nonbonded
-                param_diff = [[x[0] - y[0], x[1] - y[1], x[2] - y[2]] for x, y in zip(wt_nonbonded, mutant_nonbonded)]
-                for lam in lambdas:
-                    nonbonded_mutant_systems.append([[-x[0] * lam + y[0], -x[1] * lam + y[1], -x[2] * lam + y[2]]
-                                                     for x, y in zip(param_diff, wt_nonbonded)])
-                mutant_systems = [[[x, []], []] for x in nonbonded_mutant_systems]
-            else:
-                # nonbonded
-                param_diff = [[x[0] - y[0], x[1] - y[1], x[2] - y[2]] for x, y in zip(wt_nonbonded, mutant_nonbonded)]
-                for lam in lambdas:
-                    nonbonded_mutant_systems.append([[-x[0] * lam + y[0], -x[1] * lam + y[1], -x[2] * lam + y[2]]
-                                                     for x, y in zip(param_diff, wt_nonbonded)])
-                # ghost
-                param_diff = [[x[0] - y[0], x[1] - y[1], x[2] - y[2]] for x, y in zip(wt_ghost, mutant_ghost)]
-                for lam in lambdas:
-                    ghost_mutant_systems.append([[-x[0] * lam + y[0], -x[1] * lam + y[1], -x[2] * lam + y[2]]
-                                                 for x, y in zip(param_diff, wt_ghost)])
-                # bonds
-                param_diff = [[x[3] - y[3], x[4] - y[4]] for x, y in zip(wt_bonded, mutant_bonded)]
-                for lam in lambdas:
-                    bonded_mutant_systems.append([[y[0], y[1], y[2], -x[0] * lam + y[3], -x[1] * lam + y[4]]
-                                                  for x, y in zip(param_diff, wt_bonded)])
-
-                mutant_systems = [[[x, y], z] for x, y, z in zip(nonbonded_mutant_systems,
-                                                                 ghost_mutant_systems, bonded_mutant_systems)]
+        mutant_systems = [[x, y, z, l, k, p] for x, y, z, l, k, p in zip(interpolated_params[0], interpolated_params[1],
+                                                                         interpolated_params[2], interpolated_params[3],
+                                                                         interpolated_params[4], interpolated_params[5])]
         return mutant_systems
+
+def unit_linspace(x, y, i):
+    try:
+        unit1 = x.unit
+    except:
+        unit1 = None
+    try:
+        unit2 = y.unit
+    except:
+        unit2 = None
+    if unit1 != unit2:
+        raise ValueError('Unmatched units')
+    if unit1 is None:
+        ans = np.linspace(x, y, i)
+        ans = np.floor(ans)
+        ans = [int(x) for x in ans]
+        return ans
+    else:
+        ans = np.linspace(x/unit1, y/unit2, i)
+        ans = [x*unit1 for x in ans]
+        return ans
