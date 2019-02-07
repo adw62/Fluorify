@@ -3,7 +3,7 @@
 from .energy import FSim
 from .mol2 import Mol2, MutatedLigand
 from .optimize import Optimize
-from .molecule import Mutants
+from .mutants import Mutants
 
 import os
 import time
@@ -138,6 +138,7 @@ class Fluorify(object):
         mutations.append({'add': [], 'subtract': [], 'replace': [None]})
 
         mutant_params = Mutants(mutant_parameters, mutations, self.complex_sys[0], self.solvent_sys[0])
+        del mutant_parameters
 
         t1 = time.time()
         logger.debug('Took {} seconds'.format(t1 - t0))
@@ -151,8 +152,8 @@ class Fluorify(object):
         t0 = time.time()
 
         logger.debug('Computing solvent potential energies...')
-        solvent_free_energy = FSim.treat_phase(self.solvent_sys[0], mutant_params.solvent_params,
-                                               self.solvent_sys[1], self.solvent_sys[2], self.num_frames)
+        solvent_free_energy = FSim.treat_phase(self.solvent_sys[0], mutant_params.solvent_params, self.solvent_sys[1],
+                                               self.solvent_sys[2], self.num_frames)
         logger.debug('Computing complex potential energies...')
         complex_free_energy = FSim.treat_phase(self.complex_sys[0], mutant_params.complex_params, self.complex_sys[1],
                                                self.complex_sys[2], self.num_frames)
@@ -166,22 +167,24 @@ class Fluorify(object):
                 atom_index = int(atom)-1
                 atom_names.append(self.mol2_ligand_atoms[atom_index])
             binding_free_energy = energy - solvent_free_energy[i]
-            best_mutants.append([binding_free_energy, atom_names, mutant_parameters[i]])
+            best_mutants.append([binding_free_energy, atom_names, i])
             logger.debug('ddG for molecule{}.mol2 with'
                   ' {} substituted for {} = {}'.format(str(i), atom_names, self.job_type, binding_free_energy))
         best_mutants = sorted(best_mutants)
         t1 = time.time()
         logger.debug('Took {} seconds'.format(t1 - t0))
 
-        x_best = 3
+        x_best = min(3, len(best_mutants))
         fep = True
         if fep:
             logger.debug('Calculating FEP for {} best mutants...'.format(x_best))
             t0 = time.time()
             lambdas = np.linspace(0.0, 1.0, 10)
             for x in range(x_best):
-                complex_dg = self.complex_sys[0].run_parallel_fep(wt_parameters, best_mutants[x][2], 20000, 50, lambdas)
-                solvent_dg = self.solvent_sys[0].run_parallel_fep(wt_parameters, best_mutants[x][2], 20000, 50, lambdas)
+                complex_dg = self.complex_sys[0].run_parallel_fep(mutant_params, 0, best_mutants[x][2],
+                                                                  20000, 50, lambdas)
+                solvent_dg = self.solvent_sys[0].run_parallel_fep(mutant_params, 1, best_mutants[x][2],
+                                                                  20000, 50, lambdas)
                 ddg_fep = complex_dg - solvent_dg
                 logger.debug('Mutant {}:'.format(best_mutants[x][1]))
                 logger.debug('ddG Fluorine Scanning = {}'.format(best_mutants[x][0]))
@@ -439,15 +442,6 @@ def get_ligand_offset(input_files, mol2_ligand_atoms, ligand_name):
         snapshot = md.load(file)
         offset.append(snapshot.topology.select('resname {} and name {}'.format(ligand_name, mol2_ligand_atoms[0])))
     return tuple(offset)
-
-def exception_sorting(val):
-    return val[1], val[2]
-
-def reorder_exceptions(exceptions):
-    for sys in exceptions:
-        sys.sort(key=exception_sorting)
-    return exceptions
-
 
 
 def get_atom_list(input_files, resname):

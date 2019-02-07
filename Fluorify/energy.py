@@ -12,6 +12,8 @@ from functools import partial
 from multiprocess import Pool
 import logging
 
+from .mutants import Mutants
+
 from pymbar import MBAR, timeseries
 
 logger = logging.getLogger(__name__)
@@ -70,7 +72,7 @@ class FSim(object):
         #Add dual topology for fluorination
         if not self.opt:
             self.extended_pos, self.extended_top, self.virt_atom_order, self.h_virt_excep,\
-            self.virt_excep_shift, self.ghost_ligand_info = self.add_all_virtuals(system, nonbonded_force, snapshot, ligand_name)
+            self.virt_excep_shift, self.zero_exceptions, self.ghost_ligand_info = self.add_all_virtuals(system, nonbonded_force, snapshot, ligand_name)
             f = open(sim_dir + sim_name + '.pdb', 'w')
             mm.app.pdbfile.PDBFile.writeFile(self.extended_top, self.extended_pos, f)
             f.close()
@@ -109,7 +111,7 @@ class FSim(object):
         ligand_ghost_atoms = []
         ligand_ghost_exceptions = []
 
-        h_exceptions = list()
+        h_exceptions = []
         f_exceptions = []
         for new_atom in bond_list:
             exceptions = []
@@ -138,75 +140,17 @@ class FSim(object):
                 f_exceptions.append([idx, exception[0], exception[1], 0.0, 0.1, 0.0])
                 ligand_ghost_exceptions.append(idx)
 
-            virt_excep_shift = [[x[0], y[2]-x[1]] for x, y in zip(h_exceptions, f_exceptions)]
-            h_virt_excep = [frozenset((x[0], x[1])) for x in h_exceptions]
-
             nonbonded_force.addException(atom_added, new_atom[0], 0.0, 0.1, 0.0, False)
-        return pos, top, hydrogen_order, h_virt_excep, virt_excep_shift, [ligand_ghost_atoms, ligand_ghost_exceptions]
 
-    def run_parallel_fep(self, wt_parameters, mutant_parameters, n_steps, n_iterations, lambdas):
-        if self.opt:
-            wt_nonbonded = wt_parameters
-            mutant_nonbonded = mutant_parameters
-        else:
-            wt_nonbonded = wt_parameters[0][0]
-            mutant_nonbonded = mutant_parameters[0]
-            wt_ghost = wt_parameters[0][1]
-            mutant_ghost = mutant_parameters[1]
-            wt_bonded = wt_parameters[0][2]
-            mutant_bonded = mutant_parameters[2]
-            wt_bonded, mutant_bonded = self.reorder_mutant_bonds(wt_bonded, mutant_bonded)
+        virt_excep_shift = [[x[0], y[2]-x[1]] for x, y in zip(h_exceptions, f_exceptions)]
+        h_virt_excep = [frozenset((x[0], x[1])) for x in h_exceptions]
 
+        return pos, top, hydrogen_order, h_virt_excep, virt_excep_shift, f_exceptions, [ligand_ghost_atoms, ligand_ghost_exceptions]
+
+    def run_parallel_fep(self, mutant_params, system_idx, mutant_idx, n_steps, n_iterations, lambdas):
         logger.debug('Computing FEP for {}...'.format(self.name))
-        nonbonded_mutant_systems = []
-        ghost_mutant_systems = []
-        bonded_mutant_systems = []
-
-        #Build parmeters*lambda_schedule
-        if self.charge_only:
-            if self.opt:
-                # nonbonded
-                param_diff = [[x[0] - y[0]] for x, y in zip(wt_nonbonded, mutant_nonbonded)]
-                for lam in lambdas:
-                    nonbonded_mutant_systems.append([[-x[0] * lam + y[0]] for x, y in zip(param_diff, wt_nonbonded)])
-                mutant_systems = [[[x, []], []] for x in nonbonded_mutant_systems]
-            else:
-                #nonbonded
-                param_diff = [[x[0]-y[0]] for x, y in zip(wt_nonbonded, mutant_nonbonded)]
-                for lam in lambdas:
-                    nonbonded_mutant_systems.append([[-x[0]*lam+y[0]] for x, y in zip(param_diff, wt_nonbonded)])
-                #ghost
-                param_diff = [[x[0]-y[0]] for x, y in zip(wt_ghost, mutant_ghost)]
-                for lam in lambdas:
-                    ghost_mutant_systems.append([[-x[0]*lam+y[0]] for x, y in zip(param_diff, wt_ghost)])
-                mutant_systems = [[[x, y], []] for x, y in zip(nonbonded_mutant_systems, ghost_mutant_systems)]
-        else:
-            if self.opt:
-                #nonbonded
-                param_diff = [[x[0]-y[0], x[1]-y[1], x[2]-y[2]] for x, y in zip(wt_nonbonded, mutant_nonbonded)]
-                for lam in lambdas:
-                    nonbonded_mutant_systems.append([[-x[0]*lam+y[0], -x[1]*lam+y[1], -x[2]*lam+y[2]]
-                                           for x, y in zip(param_diff, wt_nonbonded)])
-                mutant_systems = [[[x, []], []] for x in nonbonded_mutant_systems]
-            else:
-                #nonbonded
-                param_diff = [[x[0]-y[0], x[1]-y[1], x[2]-y[2]] for x, y in zip(wt_nonbonded, mutant_nonbonded)]
-                for lam in lambdas:
-                    nonbonded_mutant_systems.append([[-x[0]*lam+y[0], -x[1]*lam+y[1], -x[2]*lam+y[2]]
-                                           for x, y in zip(param_diff, wt_nonbonded)])
-                #ghost
-                param_diff = [[x[0]-y[0], x[1]-y[1], x[2]-y[2]] for x, y in zip(wt_ghost, mutant_ghost)]
-                for lam in lambdas:
-                    ghost_mutant_systems.append([[-x[0]*lam+y[0], -x[1]*lam+y[1], -x[2]*lam+y[2]]
-                                           for x, y in zip(param_diff, wt_ghost)])
-                #bonds
-                param_diff = [[x[3]-y[3], x[4]-y[4]] for x, y in zip(wt_bonded, mutant_bonded)]
-                for lam in lambdas:
-                    bonded_mutant_systems.append([[y[0], y[1], y[2], -x[0]*lam+y[3], -x[1]*lam+y[4]]
-                                                for x, y in zip(param_diff, wt_bonded)])
-
-                mutant_systems = [[[x, y], z] for x, y, z in zip(nonbonded_mutant_systems,
-                                                                 ghost_mutant_systems, bonded_mutant_systems)]
+        mutant_systems = mutant_params.build_fep_systems(mutant_idx, system_idx, lambdas,
+                                                       opt=self.opt, charge_only=self.charge_only)
 
         nstates = len(mutant_systems)
         chunk = math.ceil(len(mutant_systems) / self.num_gpu)
@@ -227,26 +171,6 @@ class FSim(object):
         ddg = FSim.gather_dg(self, u_kln, nstates)
 
         return ddg
-
-    def reorder_mutant_bonds(self, wt_bond, mutant_bond):
-        """
-        reorders mutant harmonic bonds so they match wt_system and removes harmonic bonds associated with any transformations
-        from hydrogen to another atom as these bonds are represented as constraints in the wt_system and applying harmonic
-        parameters to these will not work.
-        :param wt_bond: harmonic parameters of wt system
-        :param mutant_bond: harmonic parameters of mutant system
-        :param offset: offset in atom indexing between input systems
-        :return: updated bond lists
-        """
-        new_bonds = []
-        for bonds in [wt_bond, mutant_bond]:
-            tmp = []
-            for bond_i in self.bond_list:
-                for bond_j in bonds:
-                    if bond_i[1]-self.offset == bond_j[1] and bond_i[2]-self.offset == bond_j[2]:
-                        tmp.append([bond_i[0], bond_i[1], bond_i[2], bond_j[3], bond_j[4]])
-            new_bonds.append(tmp)
-        return tuple(new_bonds)
 
     def gather_dg(self, u_kln, nstates):
         u_kln = np.vstack(u_kln)
@@ -287,52 +211,36 @@ class FSim(object):
         pool.terminate()
         return dcd_names
 
-    def zero_ghost_exceptions(self, system):
-        """
-        By initilizing ghost exceptions as non-zero it allows us to change them later without throwing an error
-        however these exceptions must be zeroed after the context is created to simulate the physical system.
-        """
-        force = system.getForce(self.nonbonded_index)
-        for excep in self.exceptions[1]:
-            force.setExceptionParameters(*excep)
-        return force
-
-    def build_context(self, system, device):
-        integrator = mm.LangevinIntegrator(self.temperature, self.friction, self.timestep)
-        integrator.setConstraintTolerance(0.00001)
-        platform = mm.Platform.getPlatformByName('CUDA')
-        properties = {'CudaPrecision': 'mixed', 'CudaDeviceIndex': device}
-        context = mm.Context(system, integrator, platform, properties)
-        return context, integrator
-
-    def treat_phase(self, mutant_parameters, dcd, top, num_frames):
-        mutant_energy = FSim.get_mutant_energy(self, mutant_parameters, dcd, top, num_frames)
-        wildtype_energy = mutant_energy.pop(-1)
-        phase_free_energy = FSim.get_free_energy(self, mutant_energy, wildtype_energy)
-        return phase_free_energy
-
-    def apply_constraint_parameters(self, system, mutant_parameters):
-        for constraint in mutant_parameters:
-            system.setConstraintParameters(*constraint)
-
-
-
     def apply_bonded_parameters(self, force, mutant_parameters):
-        for bond in mutant_parameters:
-            force.setBondParameters(*bond)
+        for bond_idx, particle_idxs, bond in zip(self.ligand_info[2], self.bond_list, mutant_parameters):
+            if frozenset((particle_idxs[0]-self.offset, particle_idxs[1]-self.offset)) != bond['id']:
+                raise (ValueError('Fluorify has failed to generate bonds correctly please raise '
+                                  'this as and issue at https://github.com/adw62/Fluorify'))
+            data = bond['data']
+            print(data)
+            force.setBondParameters(bond_idx, particle_idxs[0], particle_idxs[1], data[0], data[1])
+
+    def apply_torsion_parameters(self, force, mutant_parameters):
+        for torsion_idx, particle_idxs, torsion in zip(self.ligand_info[3], self.torsion_list, mutant_parameters):
+            particle_idxs = [x-self.offset for x in particle_idxs]
+            if frozenset((particle_idxs[0], particle_idxs[1], particle_idxs[2], particle_idxs[3])) != torsion['id']:
+                raise (ValueError('Fluorify has failed to generate torsions correctly please raise '
+                                  'this as and issue at https://github.com/adw62/Fluorify'))
+            data = torsion['data']
+            force.setTorsionParameters(torsion_idx, particle_idxs[0], particle_idxs[1], particle_idxs[2], particle_idxs[3],
+                                       data[0], data[1], data[2])
 
     def apply_nonbonded_parameters(self, force, params, ghost_params, excep, ghost_excep):
         if self.opt:
             ghost_params = []
             ghost_excep = []
-
         #NONBONDED
         for i, index in enumerate(self.ligand_info[0]):
             atom = int(index)
             nonbonded_params = params[i]['data']
             print(atom, params[i]['id']+self.offset)
             if atom != params[i]['id']+self.offset:
-                raise (ValueError('Fluorify has failed to generate these systems correctly please raise '
+                raise (ValueError('Fluorify has failed to generate nonbonded parameters(0) correctly please raise '
                                   'this as and issue at https://github.com/adw62/Fluorify'))
             if self.charge_only:
                 charge, sigma, epsilon = force.getParticleParameters(atom)
@@ -347,7 +255,7 @@ class FSim(object):
             nonbonded_params = ghost_params[i]['data']
             print(atom, ghost_params[i]['id'])
             if atom != int(ghost_params[i]['id']):
-                raise (ValueError('Fluorify has failed to generate these systems correctly please raise '
+                raise (ValueError('Fluorify has failed to generate nonbonded parameters(1) correctly please raise '
                                   'this as and issue at https://github.com/adw62/Fluorify'))
             if self.charge_only:
                 charge, sigma, epsilon = force.getParticleParameters(atom)
@@ -362,7 +270,7 @@ class FSim(object):
             [p1, p2, charge_prod, sigma, eps] = force.getExceptionParameters(excep_idx)
             print(frozenset((p1-self.offset, p2-self.offset)), excep[i]['id'])
             if frozenset((p1-self.offset, p2-self.offset)) != excep[i]['id']:
-                raise (ValueError('Fluorify has failed to generate these systems correctly please raise '
+                raise (ValueError('Fluorify has failed to generate nonbonded parameters(2) correctly please raise '
                                   'this as and issue at https://github.com/adw62/Fluorify'))
             if self.charge_only:
                 force.setExceptionParameters(excep_idx, p1, p2, excep_params[0], sigma, eps)
@@ -375,7 +283,7 @@ class FSim(object):
             [p1, p2, charge_prod, sigma, eps] = force.getExceptionParameters(excep_idx)
             print(frozenset((p1-self.offset, p2-shift[1]-self.offset)), ghost_excep[i]['id'])
             if frozenset((p1-self.offset, p2-shift[1]-self.offset)) != ghost_excep[i]['id']:
-                raise (ValueError('Fluorify has failed to generate these systems correctly please raise '
+                raise (ValueError('Fluorify has failed to generate nonbonded parameters(3) correctly please raise '
                                   'this as and issue at https://github.com/adw62/Fluorify'))
             if self.charge_only:
                 force.setExceptionParameters(excep_idx, p1, p2, excep_params[0], sigma, eps)
@@ -384,10 +292,8 @@ class FSim(object):
         print(force.getNumExceptions())
 
     def get_mutant_energy(self, parameters, dcd, top, num_frames):
-
         chunk = math.ceil(len(parameters)/self.num_gpu)
         groups = grouper(range(len(parameters)), chunk)
-
         pool = Pool(processes=self.num_gpu)
         mutant_eng = partial(mutant_energy, sim=self, dcd=dcd, top=top, num_frames=num_frames, all_mutants=parameters)
         mutants_systems_energies = pool.map(mutant_eng, groups)
@@ -405,10 +311,33 @@ class FSim(object):
             for i in range(len(ligand)):
                 tmp += (np.exp(-(ligand[i] - wildtype_energy[i]) / self.kT))
             ans.append(tmp / len(mutant_energy))
-
         for ligand in ans:
             free_energy.append(-np.log(ligand) * self.kTtokcal)
         return free_energy
+
+    def zero_ghost_exceptions(self, system):
+        """
+        By initilizing ghost exceptions as non-zero it allows us to change them later without throwing an error
+        however these exceptions must be zeroed after the context is created to simulate the physical system.
+        """
+        force = system.getForce(self.nonbonded_index)
+        for excep in self.zero_exceptions:
+            force.setExceptionParameters(*excep)
+        return force
+
+    def build_context(self, system, device):
+        integrator = mm.LangevinIntegrator(self.temperature, self.friction, self.timestep)
+        integrator.setConstraintTolerance(0.00001)
+        platform = mm.Platform.getPlatformByName('CUDA')
+        properties = {'CudaPrecision': 'mixed', 'CudaDeviceIndex': device}
+        context = mm.Context(system, integrator, platform, properties)
+        return context, integrator
+
+    def treat_phase(self, mutant_parameters, dcd, top, num_frames):
+        mutant_energy = FSim.get_mutant_energy(self, mutant_parameters, dcd, top, num_frames)
+        wildtype_energy = mutant_energy.pop(-1)
+        phase_free_energy = FSim.get_free_energy(self, mutant_energy, wildtype_energy)
+        return phase_free_energy
 
 
 def mutant_energy(idxs, sim, dcd, top, num_frames, all_mutants):
@@ -419,7 +348,8 @@ def mutant_energy(idxs, sim, dcd, top, num_frames, all_mutants):
     system = copy.deepcopy(sim.wt_system)
     context, integrator = sim.build_context(system, device=device)
     del integrator
-    nonbonded_force = system.getForce(sim.nonbonded_index)
+    nonbonded_force = FSim.zero_ghost_exceptions(sim, system)
+    nonbonded_force.updateParametersInContext(context)
     harmonic_force = system.getForce(sim.harmonic_index)
     torsion_force = system.getForce(sim.torsion_index)
     num_mutants = len(all_mutants)
@@ -428,12 +358,13 @@ def mutant_energy(idxs, sim, dcd, top, num_frames, all_mutants):
            logger.debug('Computing potential for wild type ligand')
         else:
             logger.debug('Computing potential for mutant {0}/{1} on GPU {2}'.format(i+1, (num_mutants-1), device))
-        sim.apply_nonbonded_parameters(nonbonded_force, all_mutants[i][0], all_mutants[i][1], all_mutants[i][2], all_mutants[i][3])
+        sim.apply_nonbonded_parameters(nonbonded_force, all_mutants[i][0], all_mutants[i][1],
+                                       all_mutants[i][2], all_mutants[i][3])
         nonbonded_force.updateParametersInContext(context)
-        #sim.apply_bonded_parameters(harmonic_force, all_mutants[i][4])
-        #harmonic_force.updateParametersInContext(context)
-        #sim.apply_torsion_parameters(torsion_force, all_mutants[i][5])
-        #torsion_force.updateParametersInContext(context)
+        sim.apply_bonded_parameters(harmonic_force, all_mutants[i][4])
+        harmonic_force.updateParametersInContext(context)
+        sim.apply_torsion_parameters(torsion_force, all_mutants[i][5])
+        torsion_force.updateParametersInContext(context)
         mutant_energies = []
         append = mutant_energies.append
         for frame in frames(dcd, top, maxframes=num_frames):
