@@ -11,28 +11,71 @@ logger = logging.getLogger(__name__)
 
 #CONSTANTS
 e = unit.elementary_charges
+ee = e*e
 
 class Optimize(object):
-    def __init__(self, wt_ligand, complex_sys, solvent_sys, output_folder, num_frames, name, steps):
+    def __init__(self, wt_ligand, complex_sys, solvent_sys, output_folder, num_frames, equi, name, steps,
+                 charge_only):
 
         self.complex_sys = complex_sys
         self.solvent_sys = solvent_sys
         self.num_frames = num_frames
+        self.equi = equi
         self.steps = steps
         self.output_folder = output_folder
-        #TODO add VDW
-        wt_parameters = [x[0]/e for x in wt_ligand.get_parameters()]
-        self.net_charge = sum(wt_parameters)
-        self.wt_parameters = [[x] for x in wt_parameters]
+        self.charge_only = charge_only
+        self.wt_nonbonded, self.wt_nonbonded_ids, self.wt_excep,\
+        self.net_charge = Optimize.build_params(self, wt_ligand)
+        self.excep_scaling = Optimize.get_exception_scaling(self)
         Optimize.optimize(self, name)
+
+    def build_params(self, wt_ligand):
+        if self.charge_only == False:
+            #TODO add VDW
+            raise ValueError('Can only optimize charge')
+        else:
+            #get all wt params
+            wt_parameters = wt_ligand.get_parameters()
+            #trim down to nonbonded and exclusions
+            wt_nonbonded = wt_parameters[0]
+            wt_excep = wt_parameters[1]
+            wt_nonbonded_ids = [x['id'] for x in wt_nonbonded]
+            wt_nonbonded = [x['data'][0]/e for x in wt_nonbonded]
+            wt_nonbonded = [[x] for x in wt_nonbonded]
+            wt_excep = [{'id': x['id'], 'data': x['data'][0]/ee} for x in wt_excep]
+            net_charge = sum(wt_nonbonded)
+        return wt_nonbonded, wt_nonbonded_ids, wt_excep, net_charge
+
+    def get_exception_scaling(self):
+        exceptions = copy.deepcopy(self.wt_excep)
+        if self.charge_only == False:
+            pass
+        else:
+            for atom_id, charge in zip(self.wt_nonbonded_ids, self.wt_nonbonded):
+                for charge_prod in exceptions:
+                    if atom_id in charge_prod['id']:
+                        charge_prod['data'] = charge_prod['data']/charge
+        return exceptions
+
+    def get_charge_product(self, charges, charge_ids):
+        new_charge_product = copy.deepcopy(self.excep_scaling)
+        if self.charge_only == False:
+            pass
+        else:
+            for atom_id, charge in zip(charge_ids, charges):
+                for charge_prod in new_charge_product:
+                    if atom_id in charge_prod['id']:
+                        charge_prod['data'] = charge_prod['data']*charge
+        return new_charge_product
 
     def optimize(self, name):
         """optimising ligand charges
         """
         if name == 'scipy':
             opt_charges, ddg_fs = Optimize.scipy_opt(self)
+            logger.debug('Original charges: {}'.format([x[0] for x in self.wt_parameters]))
+            logger.debug('Optimized charges: {}'.format(opt_charges))
             opt_charges = [[x] for x in opt_charges]
-            logger.debug(opt_charges)
             fep = True
             lambdas = np.linspace(0.0, 1.0, 10)
             if fep:
@@ -42,15 +85,14 @@ class Optimize(object):
                 logger.debug('ddG Fluorine Scanning = {}'.format(ddg_fs))
                 logger.debug('ddG FEP = {}'.format(ddg_fep))
         else:
-            Optimize.grad_opt(self, name)
-
+            raise ValueError('No other optimizers implemented')
 
     def scipy_opt(self):
         cons = {'type': 'eq', 'fun': constraint, 'args': [self.net_charge]}
-        charges = self.wt_parameters
+        charges = self.wt_nonbonded
         ddg = 0.0
         for step in range(self.steps):
-            max_change = 0.5
+            max_change = 0.1
             bnds = [sorted((x[0] - max_change * x[0], x[0] + max_change * x[0])) for x in charges]
             sol = minimize(objective, charges, bounds=bnds, options={'maxiter': 1}, jac=gradient,
                            args=(charges, self.complex_sys, self.solvent_sys, self.num_frames), constraints=cons)
@@ -59,13 +101,14 @@ class Optimize(object):
 
             #run new dynamics with updated charges
             self.complex_sys[1] = self.complex_sys[0].run_parallel_dynamics(self.output_folder, 'complex_step'+str(step),
-                                                                            self.num_frames*2500, charges)
+                                                                            self.num_frames*2500, self.equi, [charges])
             self.solvent_sys[1] = self.solvent_sys[0].run_parallel_dynamics(self.output_folder, 'solvent_step'+str(step),
-                                                                            self.num_frames*2500, charges)
+                                                                            self.num_frames*2500, self.equi, [charges])
             prev_charges = [x[0] for x in prev_charges]
             logger.debug('Computing reverse leg of accepted step...')
             reverse_ddg = -1*objective(prev_charges, charges, self.complex_sys, self.solvent_sys, self.num_frames)
-            if abs(sol.fun) >= 2*abs(reverse_ddg) or abs(sol.fun) <= 0.5*abs(reverse_ddg):
+            # NOT WORKING !!!
+            if abs(sol.fun) >= 1.5*abs(reverse_ddg) or abs(sol.fun) <= 0.6666*abs(reverse_ddg):
                 logger.debug('Forward {} and reverse {} are not well agreed. Need more sampling'.format(sol.fun, reverse_ddg))
             ddg += (sol.fun+reverse_ddg)/2.0
             logger.debug(sol)
@@ -73,65 +116,15 @@ class Optimize(object):
 
         return sol.x, ddg
 
-    def grad_opt(self, opt_type):
-        """
-        different strategries of gradient descent
-        """
-        # assert that opt_type is known
-        assert opt_type in ['gradient_descent',
-                            'adagrad',
-                            'momentum']
-        # import tensorflow locally here
-        import tensorflow as tf
-        # enable eager execution if it is not enabled in the background
-        try:
-            tf.enable_eager_execution()
-        except:
-            pass
-        # a small learning rate helps keep the perturbation small
-        learning_rate = 0.1
-        # specify the optimizer based on the type
-        if opt_type == 'gradient_descent':
-            optimizer = tf.training.optimizer.GradientDescentOptimizer(learning_rate=learning_rate)
-        elif opt_type == 'adagrad':
-            optimizer = tf.training.optimizer.AdagradOptimizer(learning_rate=learning_rate)
-        elif opt_type == 'momentum':
-            optimizer = tf.trainig.optimizer.MomentumOptimizer(learning_rate=learning_rate)
-        # code the weights as a variable
-        wt_parameters = np.array(self.wt_parameters, dtype=np.float32)
-        charge_sum = tf.reduce_sum(wt_parameters)
-        wt_vat = tf.Variable(wt_parameters,
-                            constraint=lambda x : charge_sum * tf.div(x, tf.norm(x)))
-        for step in range(self.steps):
-            # optimize
-            opt_op = optimizer.minimize(lambda x: objective(x.numpy(),
-                                        self.wt_energy_complex, self.wt_energy_solvent,
-                                        self.complex_sys, self.solvent_sys, self.num_frames))
-            opt_op.run()
-            #run new dynamics with updated charges
-            self.complex_sys[0].run_dynamics(self.output_folder, 'complex'+str(step), wt_parameters)
-            self.solvent_sys[0].run_dynamics(self.output_folder, 'solvent'+str(step), wt_parameters)
-            #update path to trajectrory
-            self.complex_sys[1] = self.output_folder+'complex'+str(step)
-            self.solvent_sys[1] = self.output_folder+'solvent'+str(step)
-            #get new wt_mutant energies
-            self.wt_energy_complex = FSim.get_mutant_energy(self.complex_sys[0], [self.wt_parameters],
-                                                            self.complex_sys[1],
-                                                            self.complex_sys[2], self.num_frames, True)
-            self.wt_energy_solvent = FSim.get_mutant_energy(self.solvent_sys[0], [self.wt_parameters],
-                                                            self.solvent_sys[1],
-                                                            self.solvent_sys[2], self.num_frames, True)
-
-
 def objective(mutant_parameters, wt_parameters, complex_sys, solvent_sys, num_frames):
-    mutant_parameters = [[[x] for x in mutant_parameters]]
+    mutant_parameters = [[x] for x in mutant_parameters]
     logger.debug('Computing Objective...')
-    complex_free_energy = FSim.treat_phase(complex_sys[0], wt_parameters, mutant_parameters,
+    complex_free_energy = FSim.treat_phase(complex_sys[0], [[wt_parameters]], [[mutant_parameters]],
                                            complex_sys[1], complex_sys[2], num_frames)
-    solvent_free_energy = FSim.treat_phase(solvent_sys[0], wt_parameters, mutant_parameters,
+    solvent_free_energy = FSim.treat_phase(solvent_sys[0], [[wt_parameters]], [[mutant_parameters]],
                                            solvent_sys[1], solvent_sys[2], num_frames)
     binding_free_energy = complex_free_energy[0] - solvent_free_energy[0]
-    return binding_free_energy
+    return binding_free_energy/unit.kilocalories_per_mole
 
 
 def gradient(mutant_parameters, wt_parameters, complex_sys, solvent_sys, num_frames):
@@ -139,20 +132,22 @@ def gradient(mutant_parameters, wt_parameters, complex_sys, solvent_sys, num_fra
     binding_free_energy = []
     og_mutant_parameters = mutant_parameters
     mutant_parameters = []
+    h = 1.5e-04
     for i in range(len(og_mutant_parameters)):
         mutant = copy.deepcopy(og_mutant_parameters)
-        mutant[i] = mutant[i] + 1.5e-04
+        mutant[i] = mutant[i] + h
         mutant = [[x] for x in mutant]
-        mutant_parameters.append(mutant)
+        mutant_parameters.append([mutant])
 
     logger.debug('Computing Jacobian...')
-    complex_free_energy = FSim.treat_phase(complex_sys[0], wt_parameters, mutant_parameters,
+    complex_free_energy = FSim.treat_phase(complex_sys[0], [[wt_parameters]], mutant_parameters,
                                            complex_sys[1], complex_sys[2], num_frames)
-    solvent_free_energy = FSim.treat_phase(solvent_sys[0], wt_parameters, mutant_parameters,
+    solvent_free_energy = FSim.treat_phase(solvent_sys[0], [[wt_parameters]], mutant_parameters,
                                            solvent_sys[1], solvent_sys[2], num_frames)
     for sol, com in zip(solvent_free_energy, complex_free_energy):
         free_energy = com - sol
-        binding_free_energy.append(free_energy)
+        free_energy = free_energy/h
+        binding_free_energy.append(free_energy/unit.kilocalories_per_mole)
     return binding_free_energy
 
 

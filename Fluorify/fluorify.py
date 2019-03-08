@@ -3,6 +3,7 @@
 from .energy import FSim
 from .mol2 import Mol2, MutatedLigand
 from .optimize import Optimize
+from .mutants import Mutants
 
 import os
 import time
@@ -12,6 +13,7 @@ import numpy as np
 import shutil
 from simtk import unit
 import logging
+import copy
 
 logger = logging.getLogger(__name__)
 
@@ -19,14 +21,15 @@ logger = logging.getLogger(__name__)
 e = unit.elementary_charges
 
 class Fluorify(object):
-    def __init__(self, output_folder, mol_name, ligand_name, net_charge, complex_name, solvent_name,
-                 job_type, auto_select, c_atom_list, h_atom_list, num_frames, charge_only, gaff_ver, opt, num_gpu):
+    def __init__(self, output_folder, mol_name, ligand_name, net_charge, complex_name, solvent_name, job_type,
+                 auto_select, c_atom_list, h_atom_list, num_frames, charge_only, gaff_ver, opt, num_gpu, num_fep, equi):
 
         self.output_folder = output_folder
         self.net_charge = net_charge
         self.job_type = job_type
         self.num_frames = num_frames
         self.gaff_ver = gaff_ver
+        self.num_fep = int(num_fep)
 
         # Prepare directories/files and read in ligand from mol2 file
         mol_file = mol_name + '.mol2'
@@ -51,18 +54,17 @@ class Fluorify(object):
             raise ValueError('Could not load molecule {}'.format(self.input_folder + mol_file))
 
         # Check ligand atom order is consistent across input topologies.
-        mol2_ligand_atoms = get_atom_list(input_folder + mol_file, ligand_name)
-        self.wt_system_size = len(mol2_ligand_atoms)
-        complex_ligand_atoms = get_atom_list(complex_sim_dir + complex_name + '.pdb', ligand_name)
-        solvent_ligand_atoms = get_atom_list(solvent_sim_dir + solvent_name + '.pdb', ligand_name)
-        if mol2_ligand_atoms != complex_ligand_atoms:
-            raise ValueError('Topology of ligand not matched across input files.'
+        input_files = [input_folder + mol_file, complex_sim_dir + complex_name + '.pdb',
+                       solvent_sim_dir + solvent_name + '.pdb']
+        self.mol2_ligand_atoms, complex_ligand_atoms, solvent_ligand_atoms = get_atom_list(input_files, ligand_name)
+        if self.mol2_ligand_atoms != complex_ligand_atoms:
+            raise ValueError('Names and or name casing and or atom order of ligand not matched across input files.'
                              'Charges will not be applied where expected')
         if complex_ligand_atoms != solvent_ligand_atoms:
-            raise ValueError('Topology of ligand not matched across input files.'
+            raise ValueError('Names and or name casing and or atom order of ligand not matched across input files.'
                              'Charges will not be applied where expected')
-        self.mol2_ligand_atoms = mol2_ligand_atoms
-
+        input_files = input_files[1:3]
+        self.complex_offset, self.solvent_offset = get_ligand_offset(input_files, self.mol2_ligand_atoms, ligand_name)
         logger.debug('Parametrize wild type ligand...')
         wt_ligand = MutatedLigand(file_path=self.output_folder, mol_name=mol_name,
                                   net_charge=self.net_charge, gaff=self.gaff_ver)
@@ -70,8 +72,8 @@ class Fluorify(object):
         logger.debug('Loading complex and solvent systems...')
         #COMPLEX
         self.complex_sys = []
-        self.complex_sys.append(FSim(ligand_name=ligand_name, sim_name=complex_name,
-                                input_folder=input_folder, charge_only=charge_only, num_gpu=num_gpu))
+        self.complex_sys.append(FSim(ligand_name=ligand_name, sim_name=complex_name, input_folder=input_folder,
+                                     charge_only=charge_only, num_gpu=num_gpu, offset=self.complex_offset, opt=opt))
         self.complex_sys.append([complex_sim_dir + complex_name + '.dcd'])
         self.complex_sys.append(complex_sim_dir + complex_name + '.pdb')
         if not os.path.isfile(self.complex_sys[1][0]):
@@ -79,12 +81,12 @@ class Fluorify(object):
             for name in self.complex_sys[1]:
                 if not os.path.isfile(name):
                     self.complex_sys[1] = self.complex_sys[0].run_parallel_dynamics(complex_sim_dir, complex_name,
-                                                                                    self.num_frames*2500, None)
+                                                                                    self.num_frames*2500, equi, None)
                     break
         #SOLVENT
         self.solvent_sys = []
-        self.solvent_sys.append(FSim(ligand_name=ligand_name, sim_name=solvent_name,
-                                input_folder=input_folder, charge_only=charge_only, num_gpu=num_gpu))
+        self.solvent_sys.append(FSim(ligand_name=ligand_name, sim_name=solvent_name, input_folder=input_folder,
+                                     charge_only=charge_only, num_gpu=num_gpu, offset=self.solvent_offset, opt=opt))
         self.solvent_sys.append([solvent_sim_dir + solvent_name + '.dcd'])
         self.solvent_sys.append(solvent_sim_dir + solvent_name + '.pdb')
         if not os.path.isfile(self.solvent_sys[1][0]):
@@ -92,13 +94,14 @@ class Fluorify(object):
             for name in self.solvent_sys[1]:
                 if not os.path.isfile(name):
                     self.solvent_sys[1] = self.solvent_sys[0].run_parallel_dynamics(solvent_sim_dir, solvent_name,
-                                                                                    self.num_frames * 2500, None)
+                                                                                    self.num_frames*2500, equi, None)
                     break
 
         if opt:
             steps = 12
             name = 'scipy'
-            Optimize(wt_ligand, self.complex_sys, self.solvent_sys, output_folder, self.num_frames, name, steps)
+            Optimize(wt_ligand, self.complex_sys, self.solvent_sys, output_folder, self.num_frames, equi, name, steps,
+                     charge_only)
         else:
             Fluorify.scanning(self, wt_ligand, auto_select, c_atom_list, h_atom_list)
 
@@ -131,6 +134,55 @@ class Fluorify(object):
             mute = mutations[i]['subtract']
             mutant_parameters.append(ligand.get_parameters(mute))
 
+        #last entry of mutant is wildtype
+        mutant_parameters.append(wt_parameters)
+        mutations.append({'add': [], 'subtract': [], 'replace': [None]})
+
+        #TODO units and torsion
+        log_param = False
+        if log_param == True:
+            for i, (mutant, mutation) in enumerate(zip(mutant_parameters, mutations)):
+                if mutant == mutant_parameters[-1]:
+                    mutant_atom_name = None
+                    logger.debug('\tWILDTYPE')
+                else:
+                    mutant_atom_name = self.mol2_ligand_atoms[int(mutation['replace'][0]) - 1]
+                    logger.debug('\tMUTANT_{}: {}'.format(i, mutant_atom_name))
+                logger.debug('\tnonbonded------------------------------------------')
+                for atom, atom_name in zip(mutant[0], self.mol2_ligand_atoms):
+                    if atom_name == mutant_atom_name:
+                        atom_name = 'F1'
+                    logger.debug('\t{0}\t{1}\t{2}\t{3}'.format(atom_name, atom['data'][0], atom['data'][1], atom['data'][2]))
+                logger.debug('\tbonds----------------------------------------------')
+                for bond in mutant[2]:
+                    indexs = list(bond['id'])
+                    atom0 = self.mol2_ligand_atoms[indexs[0]]
+                    atom1 = self.mol2_ligand_atoms[indexs[1]]
+                    if atom0 == mutant_atom_name:
+                        atom0 = 'F1'
+                    if atom1 == mutant_atom_name:
+                        atom1 = 'F1'
+                    logger.debug('\t{0}\t{1}\t{2}\t{3}'.format(atom0, atom1, bond['data'][0], bond['data'][1]))
+                logger.debug('\ttorsions-------------------------------------------')
+                for torsion in mutant[3]:
+                    indexs = list(torsion['id'])
+                    atom0 = self.mol2_ligand_atoms[indexs[0]]
+                    atom1 = self.mol2_ligand_atoms[indexs[1]]
+                    atom2 = self.mol2_ligand_atoms[indexs[2]]
+                    atom3 = self.mol2_ligand_atoms[indexs[3]]
+                    if atom0 == mutant_atom_name:
+                        atom0 = 'F1'
+                    if atom1 == mutant_atom_name:
+                        atom1 = 'F1'
+                    if atom2 == mutant_atom_name:
+                        atom2 = 'F1'
+                    if atom3 == mutant_atom_name:
+                        atom3 = 'F1'
+                    logger.debug('\t{0}\t{1}\t{2}\t{3}\t{4}'.format(atom0, atom1, atom2, atom3, torsion['data'][0], torsion['data'][1], torsion['data'][2]))
+
+        mutant_params = Mutants(mutant_parameters, mutations, self.complex_sys[0], self.solvent_sys[0])
+        del mutant_parameters
+
         t1 = time.time()
         logger.debug('Took {} seconds'.format(t1 - t0))
 
@@ -142,12 +194,13 @@ class Fluorify(object):
         logger.debug('Calculating free energies...')
         t0 = time.time()
 
+
         logger.debug('Computing complex potential energies...')
-        complex_free_energy = FSim.treat_phase(self.complex_sys[0], wt_parameters, mutant_parameters,
-                                               self.complex_sys[1], self.complex_sys[2], self.num_frames)
+        complex_free_energy = FSim.treat_phase(self.complex_sys[0], mutant_params.complex_params, self.complex_sys[1],
+                                               self.complex_sys[2], self.num_frames)
         logger.debug('Computing solvent potential energies...')
-        solvent_free_energy = FSim.treat_phase(self.solvent_sys[0], wt_parameters, mutant_parameters,
-                                               self.solvent_sys[1], self.solvent_sys[2], self.num_frames)
+        solvent_free_energy = FSim.treat_phase(self.solvent_sys[0], mutant_params.solvent_params, self.solvent_sys[1],
+                                               self.solvent_sys[2], self.num_frames)
 
         #RESULT
         best_mutants = []
@@ -157,31 +210,29 @@ class Fluorify(object):
             for atom in replace:
                 atom_index = int(atom)-1
                 atom_names.append(self.mol2_ligand_atoms[atom_index])
-
-            logger.debug('ddG for molecule{}.mol2 with'
-                  ' {} substituted for {}'.format(str(i), atom_names, self.job_type))
             binding_free_energy = energy - solvent_free_energy[i]
-            best_mutants.append([binding_free_energy, atom_names, mutant_parameters[i]])
-            logger.debug(binding_free_energy)
+            best_mutants.append([binding_free_energy, atom_names, i])
+            logger.debug('ddG for molecule{}.mol2 with'
+                  ' {} substituted for {} = {}'.format(str(i), atom_names, self.job_type, binding_free_energy))
         best_mutants = sorted(best_mutants)
         t1 = time.time()
         logger.debug('Took {} seconds'.format(t1 - t0))
 
-        x_best = 3
+        x_best = min(self.num_fep, len(best_mutants))
         fep = True
         if fep:
             logger.debug('Calculating FEP for {} best mutants...'.format(x_best))
             t0 = time.time()
-
-            lambdas = np.linspace(0.0, 1.0, 10)
             for x in range(x_best):
-                complex_dg = self.complex_sys[0].run_parallel_fep(wt_parameters, best_mutants[x][2], 20000, 50, lambdas)
-                solvent_dg = self.solvent_sys[0].run_parallel_fep(wt_parameters, best_mutants[x][2], 20000, 50, lambdas)
+                complex_dg, complex_error = self.complex_sys[0].run_parallel_fep(mutant_params, 0, best_mutants[x][2],
+                                                                                 20000, 50, 12)
+                solvent_dg, solvent_error = self.solvent_sys[0].run_parallel_fep(mutant_params, 1, best_mutants[x][2],
+                                                                                 20000, 50, 12)
                 ddg_fep = complex_dg - solvent_dg
+                ddg_error = (complex_error**2+solvent_error**2)**0.5
                 logger.debug('Mutant {}:'.format(best_mutants[x][1]))
                 logger.debug('ddG Fluorine Scanning = {}'.format(best_mutants[x][0]))
-                logger.debug('ddG FEP = {}'.format(ddg_fep))
-
+                logger.debug('ddG FEP = {} +- {}'.format(ddg_fep, ddg_error))
             t1 = time.time()
             logger.debug('Took {} seconds'.format(t1 - t0))
 
@@ -425,12 +476,28 @@ def get_single_neighbour_carbons(mol, modified_atom_type, carbon_type=None):
     return carbons, bonded_h
 
 
-def get_atom_list(file, resname):
-    atoms = []
-    traj = md.load(file)
-    top = traj.topology
-    mol = top.select('resname '+resname)
-    for idx in mol:
-        atoms.append(str(top.atom(idx)).split('-')[1])
-    return atoms
+def get_ligand_offset(input_files, mol2_ligand_atoms, ligand_name):
+    """
+    almost certain bond will be inconsistent between inputs need to map bonds between inputs
+    :return:
+    """
+    offset = []
+    for file in input_files:
+        snapshot = md.load(file)
+        diff = snapshot.topology.select('resname {} and name {}'.format(ligand_name, mol2_ligand_atoms[0]))
+        offset.append(snapshot.topology.select('resname {} and name {}'.format(ligand_name, mol2_ligand_atoms[0])))
+    return tuple(offset)
+
+
+def get_atom_list(input_files, resname):
+    atom_lists = []
+    for file in input_files:
+        atoms = []
+        traj = md.load(file)
+        top = traj.topology
+        mol = top.select('resname '+resname)
+        for idx in mol:
+            atoms.append(str(top.atom(idx)).split('-')[1])
+        atom_lists.append(atoms)
+    return tuple(atom_lists)
 

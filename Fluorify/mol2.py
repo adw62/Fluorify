@@ -1,9 +1,9 @@
 #!/usr/bin/env python
 
 import os
-import logging
 import openmoltools as moltool
 import simtk.openmm as mm
+from simtk.openmm import app
 import copy
 import numpy as np
 from simtk import unit
@@ -56,11 +56,11 @@ class Mol2(object):
                 if charges is not None:
                     for charge, line in zip(charges, v):
                         line[8] = charge
-                        line = ('{0:>7} {1:<10} {2:<9} {3:<9} {4:<5} {5:<9} {6:<1} {7:<11} {8}\n'.format(*line))
+                        line = '%7s %-5s    %9s %9s %9s %-7s %2s %4s  %12s\n' % tuple(line)
                         mol2.append(line)
                 else:
                     for line in v:
-                        line = ('{0:>7} {1:<10} {2:<9} {3:<9} {4:<5} {5:<9} {6:<1} {7:<11} {8}\n'.format(*line))
+                        line = '%7s %-5s    %9s %9s %9s %-7s %2s %4s  %12s\n' % tuple(line)
                         mol2.append(line)
             elif k == 'BOND':
                 for line in v:
@@ -228,28 +228,41 @@ class MutatedLigand(object):
     def create_system(self, file_path, name):
         parameters_file_path = file_path + name + '.prmtop'
         parameters_file = mm.app.AmberPrmtopFile(parameters_file_path)
-        self.system = parameters_file.createSystem()
+        self.system = parameters_file.createSystem(constraints=app.HBonds)
 
     def get_parameters(self, atoms_to_mute=[]):
         #atoms to mute does not work if there are more than 2 sequential atoms to mute
         system = self.system
-        ligand_parameters = []
+        nonbonded_parameters = []
+        exclusion_parameters = []
+        bonded_parameters = []
+        torsion_parameters = []
         for force in system.getForces():
             if isinstance(force, mm.NonbondedForce):
                 nonbonded_force = force
+            if isinstance(force, mm.HarmonicBondForce):
+                harmonic_force = force
+            if isinstance(force, mm.PeriodicTorsionForce):
+                torsion_force = force
+        #nonbonded
         for index in range(system.getNumParticles()):
-            if index in atoms_to_mute:
-                charge, sigma, epsilon = nonbonded_force.getParticleParameters(index)
-                ligand_parameters.append([0.0*charge, 1.0*unit.angstrom, epsilon*0.0])
-                if index + 1 in atoms_to_mute:
-                    ligand_parameters.append([0.0*charge, 1.0*unit.angstrom, epsilon*0.0])
-                    if index + 2 in atoms_to_mute:
-                        raise ValueError('Work in progress: Too many pyridinations per mutant')
-                ligand_parameters.append([charge, sigma, epsilon])
-            else:
-                charge, sigma, epsilon = nonbonded_force.getParticleParameters(index)
-                ligand_parameters.append([charge, sigma, epsilon])
-        return np.asarray(ligand_parameters)
+            charge, sigma, epsilon = nonbonded_force.getParticleParameters(index)
+            nonbonded_parameters.append({"id": index, "data": [charge, sigma, epsilon]})
+        #exsclusions
+        for index in range(nonbonded_force.getNumExceptions()):
+            [p1, p2, chargeprod, sigma, epsilon] = nonbonded_force.getExceptionParameters(index)
+            exclusion_parameters.append({"id": frozenset((p1, p2)), "data": [chargeprod, sigma, epsilon]})
+        #harmonic
+        for index in range(harmonic_force.getNumBonds()):
+            p1, p2, r, k = harmonic_force.getBondParameters(index)
+            bonded_parameters.append({"id": frozenset((p1, p2)), "data": [r, k]})
+        #torsions
+        for index in range(torsion_force.getNumTorsions()):
+            p1, p2, p3, p4, period, phase, k = torsion_force.getTorsionParameters(index)
+            torsion_parameters.append({"id": frozenset((p1, p2, p3, p4)), "data": [period, phase, k]})
+
+        return [nonbonded_parameters, exclusion_parameters,
+                bonded_parameters, torsion_parameters]
 
 
 def run_ante(file_path, file_name, name, net_charge, gaff):
