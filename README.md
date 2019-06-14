@@ -11,6 +11,7 @@ Perform Fluorine scanning analysis on trajectories.
 
   pip install path/to/directory
   
-- Install yank to get all dependencies
+- Install yank and multiprocess to get all dependencies
  
   conda install -c omnia yank
+  conda install -c conda-forge multiprocess
