@@ -14,3 +14,4 @@ Perform Fluorine scanning analysis on trajectories.
 - Install multiprocess dependency
  
   conda install -c conda-forge multiprocess
+  conda install -c omnia openmoltools
