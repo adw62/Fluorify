@@ -11,7 +11,6 @@ Perform Fluorine scanning analysis on trajectories.
 
   pip install path/to/directory
   
-- Install multiprocess dependency
+- Install yank to get all dependencies
  
-  conda install -c conda-forge multiprocess
-  conda install -c omnia openmoltools
+  conda install -c omnia yank
