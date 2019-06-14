@@ -132,6 +132,8 @@ def main(argv=None):
     else:
         opt = False
     if opt == True:
+        raise ValueError('Charge optimisation no longer supported.'
+                         ' Please use https://github.com/adw62/Ligand_Charge_Optimiser')
         logger.debug('Optimizing ligand parameters...')
         c_atom_list = None
         h_atom_list = None
@@ -236,7 +238,7 @@ def main(argv=None):
 
         if args['--job_type']:
             job_type = args['--job_type'][0]
-            allowed_jobs = ['F', 'Cl', 'N', 'NxF', 'NxCl', 'S', 'VDW']
+            allowed_jobs = ['F', 'Cl', 'N', 'NxF', 'NxCl', 'VDW']
             if job_type not in allowed_jobs:
                 raise ValueError('Allowed elements {}'.format(allowed_jobs))
         else:
