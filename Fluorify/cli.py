@@ -19,7 +19,7 @@ Usage:
   Fluorify [--output_folder=STRING] [--mol_name=STRING] [--ligand_name=STRING] [--complex_name=STRING] [--solvent_name=STRING]
             [--yaml_path=STRING] [--o_atom_list=LIST] [--c_atom_list=LIST] [--h_atom_list=LIST] [--num_frames=INT] [--net_charge=INT]
             [--gaff_ver=INT] [--equi=INT] [--num_fep=INT] [--auto_select=STRING] [--charge_only=BOOL] [--vdw_only=BOOL] [--optimize=BOOL]
-            [--num_gpu=INT] [--opt_name=STRING] [--rmsd=FLOAT] [--opt_steps=INT] [--central_diff=BOOL] [--job_type=STRING]...
+            [--num_gpu=INT] [--opt_name=STRING] [--rmsd=FLOAT] [--exclude_dualtopo=BOOL] [--opt_steps=INT] [--central_diff=BOOL] [--job_type=STRING]...
 """
 
 
@@ -96,7 +96,7 @@ def main(argv=None):
         equi = int(args['--equi'])
     else:
         equi = 250000
-        logger.debug(msg.format('Number of equlibriation steps', equi))
+        logger.debug(msg.format('Number of equilibration steps', equi))
 
     if args['--net_charge']:
         net_charge = int(args['--net_charge'])
@@ -128,7 +128,12 @@ def main(argv=None):
         logger.debug('Mutating ligand VDW only...')
     else:
         logger.debug('Mutating all ligand parameters...')
-
+        
+    if args['--exclude_dualtopo']:
+        exclude_dualtopo = int(args['--exclude_dualtopo'])
+    else:
+        exclude_dualtopo = True
+        
     if args['--optimize']:
         opt = int(args['--optimize'])
     else:
@@ -136,35 +141,6 @@ def main(argv=None):
     if opt == True:
         raise ValueError('Charge optimisation no longer supported.'
                          ' Please use https://github.com/adw62/Ligand_Charge_Optimiser')
-        logger.debug('Optimizing ligand parameters...')
-        c_atom_list = None
-        h_atom_list = None
-        o_atom_list = None
-        auto_select = None
-        job_type = 'optimize'
-        if args['--central_diff']:
-            central_diff = int(args['--central_diff'])
-        else:
-            central_diff = True
-            logger.debug(msg.format('finite difference method', 'central difference'))
-        optimizer_names = ['scipy', 'FEP_only', 'SSP_convergence_test', 'FEP_convergence_test', 'FS_test']
-        if args['--opt_name']:
-            opt_name = args['--opt_name']
-            if opt_name not in optimizer_names:
-                raise ValueError('Unknown optimizer specified chose from {}'.format(optimizer_names))
-        else:
-            opt_name = 'scipy'
-            logger.debug(msg.format('optimization method', opt_name))
-        if args['--opt_steps']:
-            opt_steps = int(args['--opt_steps'])
-        else:
-            opt_steps = 10
-            logger.debug(msg.format('number of optimization steps', opt_steps))
-        if args['--rmsd']:
-            rmsd = float(args['--rmsd'])
-        else:
-            rmsd = 0.02
-            logger.debug(msg.format('optimization rmsd', rmsd))
     else:
         logger.debug('Scanning ligand...')
         if args['--central_diff']:
@@ -185,6 +161,7 @@ def main(argv=None):
             rmsd = None
         if args['--c_atom_list']:
             c_atom_list = []
+            c_name = args['--c_atom_list']
             pairs = args['--c_atom_list']
             pairs = pairs.replace(" ", "")
             pairs = pairs.split('and')
@@ -199,6 +176,7 @@ def main(argv=None):
 
         if args['--h_atom_list']:
             h_atom_list = []
+            h_name = args['--h_atom_list']
             pairs = args['--h_atom_list']
             pairs = pairs.replace(" ", "")
             pairs = pairs.split('and')
@@ -213,6 +191,7 @@ def main(argv=None):
 
         if args['--o_atom_list']:
             o_atom_list = []
+            o_name = args['--o_atom_list']
             pairs = args['--o_atom_list']
             pairs = pairs.replace(" ", "")
             pairs = pairs.split('and')
@@ -250,7 +229,16 @@ def main(argv=None):
     if args['--output_folder']:
         output_folder = args['--output_folder']
     else:
-        output_folder = './' + mol_name + '_' + job_type + '/'
+        id = ''
+        if auto_select is not None:
+            id += '_auto_' + auto_select
+        if h_atom_list is not None:
+            id += '_H' + h_name
+        if c_atom_list is not None:
+            id += '_C' + c_name
+        if o_atom_list is not None:
+            id += '_O' + o_name
+        output_folder = './' + mol_name + '_' + job_type + id + '/'
         logger.debug(msg.format('output folder', output_folder))
 
     if args['--num_gpu']:
@@ -268,5 +256,5 @@ def main(argv=None):
 
     Fluorify(output_folder, mol_name, ligand_name, net_charge, complex_name, solvent_name,
          job_type, auto_select, c_atom_list, h_atom_list, o_atom_list, num_frames, charge_only, vdw_only, gaff_ver,
-             opt, num_gpu, num_fep, equi, central_diff, opt_name, opt_steps, rmsd)
+             opt, num_gpu, num_fep, equi, central_diff, opt_name, opt_steps, rmsd, exclude_dualtopo)
 

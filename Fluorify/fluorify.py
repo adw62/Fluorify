@@ -23,7 +23,7 @@ e = unit.elementary_charges
 class Fluorify(object):
     def __init__(self, output_folder, mol_name, ligand_name, net_charge, complex_name, solvent_name, job_type,
                  auto_select, c_atom_list, h_atom_list, o_atom_list, num_frames, charge_only, vdw_only, gaff_ver, opt, num_gpu,
-                 num_fep, equi, central_diff, opt_name, opt_steps, rmsd):
+                 num_fep, equi, central_diff, opt_name, opt_steps, rmsd, exclude_dualtopo):
 
         self.output_folder = output_folder
         self.net_charge = net_charge
@@ -87,7 +87,8 @@ class Fluorify(object):
         #COMPLEX
         self.complex_sys = []
         self.complex_sys.append(FSim(ligand_name=ligand_name, sim_name=complex_name, input_folder=input_folder,
-                                     charge_only=charge_only, vdw_only=vdw_only, num_gpu=num_gpu, offset=self.complex_offset, opt=opt))
+                                     charge_only=charge_only, vdw_only=vdw_only, num_gpu=num_gpu, offset=self.complex_offset,
+                                     opt=opt, exclude_dualtopo=exclude_dualtopo))
         self.complex_sys.append([complex_sim_dir + complex_name + '.dcd'])
         self.complex_sys.append(complex_sim_dir + complex_name + '.pdb')
         if run_dynamics:
@@ -101,7 +102,8 @@ class Fluorify(object):
         #SOLVENT
         self.solvent_sys = []
         self.solvent_sys.append(FSim(ligand_name=ligand_name, sim_name=solvent_name, input_folder=input_folder,
-                                     charge_only=charge_only, vdw_only=vdw_only, num_gpu=num_gpu, offset=self.solvent_offset, opt=opt))
+                                     charge_only=charge_only, vdw_only=vdw_only, num_gpu=num_gpu, offset=self.solvent_offset,
+                                     opt=opt, exclude_dualtopo=exclude_dualtopo))
         self.solvent_sys.append([solvent_sim_dir + solvent_name + '.dcd'])
         self.solvent_sys.append(solvent_sim_dir + solvent_name + '.pdb')
         if run_dynamics:
