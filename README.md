@@ -19,7 +19,7 @@ Perform Fluorine scanning analysis on trajectories.
   
 # Options
 
-[--job_type=STRING] FEP jobs that can be performed,
+[--job_type=STRING] Scanning and full FEP jobs that can be performed,
 
     default: 'F'
     options:
