@@ -436,7 +436,7 @@ def add_sulphurs(mol, new_element, auto_select, atom_list):
     for i, mutant in enumerate(mutated_systems):
         mutations.append({'add': [], 'subtract': [], 'replace': [], 'replace_insitu': []})
         for atom in atom_list[i]:
-            mutations[i]['replace'].append(int(atom))
+            mutations[i]['replace_insitu'].append(int(atom))
     return mutated_systems, mutations
 
 
