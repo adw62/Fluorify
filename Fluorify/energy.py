@@ -226,7 +226,7 @@ class FSim(object):
 
         if self.exclude_dualtopo:
             #add exclusions between all atoms in hybrid topo.
-            logger.debug('Excluding all atoms in dual topology from see each other for {}'.format(self.name))
+            logger.debug('Excluding all atoms in dual topology from seeing each other for {}'.format(self.name))
             for atomi in all_new_atoms:
                 for atomj in all_new_atoms:
                     if atomj != atomi:

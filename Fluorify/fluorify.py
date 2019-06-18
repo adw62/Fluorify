@@ -301,7 +301,7 @@ class Fluorify(object):
 
         else:
             if h_atoms is None or c_atoms is None:
-                raise ValueError('Mixed substitution requested must provided carbon and hydrogen atom lists')
+                raise ValueError('Mixed substitution requested must provide carbon and hydrogen atom lists')
             job_type[0] = 'N.ar'
             mutated_systems = []
             mutations = []
@@ -314,6 +314,7 @@ class Fluorify(object):
                     p_mutations[j]['add'].extend(f_mutations[i]['add'])
                     p_mutations[j]['subtract'].extend(f_mutations[i]['subtract'])
                     p_mutations[j]['replace'].extend(f_mutations[i]['replace'])
+                    p_mutations[j]['replace'].extend(f_mutations[i]['replace_insitu'])
                 mutated_systems.extend(p_mutated_systems)
                 mutations.extend(p_mutations)
         return mutated_systems, mutations
