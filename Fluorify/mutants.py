@@ -14,8 +14,6 @@ ee = e*e
 nm = unit.nanometer
 kj_mol = unit.kilojoules_per_mole
 radian = unit.radian
-mol = unit.mole
-
 
 class Mutants(object):
     def __init__(self, params, mutations, complex_sys, solvent_sys):
@@ -250,7 +248,7 @@ class Mutants(object):
         #iterate over mutants
         for i, x in enumerate(ang_to_add):
             for angle in x:
-                params[i].append({'id': frozenset(angle), 'data': [1.9*radian, 0.0*mol*radian**2]})
+                params[i].append({'id': frozenset(angle), 'data': [1.9*radian, 0.0*kj_mol/(radian**2)]})
 
         angle_params = [[], []]
         for i, (sys_angle_order, sys_offset) in enumerate(zip(angle_order, self.offset)):
@@ -293,7 +291,7 @@ def unit_linspace(x, y, i):
     except:
         unit2 = None
     if unit1 != unit2:
-        raise ValueError('Unmatched units')
+        raise ValueError('unit1 {} does not match unit2 {}'.format(unit1, unit2))
     if unit1 is None:
         ans = np.linspace(x, y, i)
         ans = np.floor(ans)
