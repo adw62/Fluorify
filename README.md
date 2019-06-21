@@ -3,7 +3,9 @@ Perform Fluorine scanning analysis on trajectories.
 
 # Installation
 
-- Via Conda
+- via conda
+
+  conda config --add channels omnia --add channels conda-forge
 
   conda install -c adw62 fluorify
   
