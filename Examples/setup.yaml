@@ -1,3 +1,12 @@
+# These options are needed for YANK but not used by Fluorify
+options:
+  alchemical_pme_treatment: exact
+  minimize: yes
+  verbose: yes
+  temperature: 300*kelvin
+  pressure: 1*atmosphere # To run with NVT ensemble, set this option to "null". Defaults to 1 atm if excluded
+  platform: CUDA
+
 # Configure the specific molecules we will use for our systems
 # Note: We do not specify what the "receptor" and what the "ligand" is yet
 molecules:
