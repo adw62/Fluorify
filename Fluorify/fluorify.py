@@ -63,12 +63,6 @@ class Fluorify(object):
             raise ValueError('Names and or name casing and or atom order of ligand not matched across input files.'
                              'Charges will not be applied where expected')
 
-        #write out atom names for convenience
-        file = open('atom_names', 'w')
-        for name in self.mol2_ligand_atoms:
-            file.write('{}\n'.format(name))
-        file.close()
-
         input_files = input_files[1:3]
         self.complex_offset, self.solvent_offset = get_ligand_offset(input_files, self.mol2_ligand_atoms, ligand_name)
         logger.debug('Parametrize wild type ligand...')
