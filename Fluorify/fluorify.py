@@ -2,7 +2,6 @@
 
 from .energy import FSim
 from .mol2 import Mol2, MutatedLigand
-from .optimize import Optimize
 from .mutants import Mutants
 
 import os
@@ -115,11 +114,7 @@ class Fluorify(object):
                                                                                         self.num_frames, equi, None)
                         break
 
-        if opt:
-            Optimize(wt_ligand, self.complex_sys, self.solvent_sys, output_folder, self.num_frames, equi, opt_name, opt_steps,
-                     charge_only, central_diff, self.num_fep, rmsd)
-        else:
-            Fluorify.scanning(self, wt_ligand, auto_select, c_atom_list, h_atom_list, o_atom_list)
+        Fluorify.scanning(self, wt_ligand, auto_select, c_atom_list, h_atom_list, o_atom_list)
 
     def scanning(self, wt_ligand, auto_select, c_atom_list, h_atom_list, o_atom_list):
         """preparation and running scanning analysis
@@ -154,49 +149,6 @@ class Fluorify(object):
         mutant_parameters.append(wt_parameters)
         mutations.append({'add': [], 'subtract': [], 'replace': [None], 'replace_insitu': [None]})
 
-        #TODO units and torsion
-        log_param = False
-        if log_param == True:
-            for i, (mutant, mutation) in enumerate(zip(mutant_parameters, mutations)):
-                if mutant == mutant_parameters[-1]:
-                    mutant_atom_name = None
-                    logger.debug('\tWILDTYPE')
-                else:
-                    mutant_atom_name = self.mol2_ligand_atoms[int(mutation['replace'][0]) - 1]
-                    logger.debug('\tMUTANT_{}: {}'.format(i, mutant_atom_name))
-                logger.debug('\tnonbonded------------------------------------------')
-                for atom, atom_name in zip(mutant[0], self.mol2_ligand_atoms):
-                    if atom_name == mutant_atom_name:
-                        atom_name = 'F1'
-                    logger.debug('\t{0}\t{1}\t{2}\t{3}'.format(atom_name, atom['data'][0], atom['data'][1], atom['data'][2]))
-        """
-                logger.debug('\tbonds----------------------------------------------')
-                for bond in mutant[2]:
-                    indexs = list(bond['id'])
-                    atom0 = self.mol2_ligand_atoms[indexs[0]]
-                    atom1 = self.mol2_ligand_atoms[indexs[1]]
-                    if atom0 == mutant_atom_name:
-                        atom0 = 'F1'
-                    if atom1 == mutant_atom_name:
-                        atom1 = 'F1'
-                    logger.debug('\t{0}\t{1}\t{2}\t{3}'.format(atom0, atom1, bond['data'][0], bond['data'][1]))
-                logger.debug('\ttorsions-------------------------------------------')
-                for torsion in mutant[3]:
-                    indexs = list(torsion['id'])
-                    atom0 = self.mol2_ligand_atoms[indexs[0]]
-                    atom1 = self.mol2_ligand_atoms[indexs[1]]
-                    atom2 = self.mol2_ligand_atoms[indexs[2]]
-                    atom3 = self.mol2_ligand_atoms[indexs[3]]
-                    if atom0 == mutant_atom_name:
-                        atom0 = 'F1'
-                    if atom1 == mutant_atom_name:
-                        atom1 = 'F1'
-                    if atom2 == mutant_atom_name:
-                        atom2 = 'F1'
-                    if atom3 == mutant_atom_name:
-                        atom3 = 'F1'
-                    logger.debug('\t{0}\t{1}\t{2}\t{3}\t{4}'.format(atom0, atom1, atom2, atom3, torsion['data'][0], torsion['data'][1], torsion['data'][2]))
-        """
         mutant_params = Mutants(mutant_parameters, mutations, self.complex_sys[0], self.solvent_sys[0])
         del mutant_parameters
 
