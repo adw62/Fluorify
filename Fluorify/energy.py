@@ -11,7 +11,6 @@ import math
 from functools import partial
 from multiprocess import Pool
 import logging
-
 from pymbar import MBAR, timeseries
 
 logger = logging.getLogger(__name__)

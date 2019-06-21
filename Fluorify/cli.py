@@ -17,9 +17,9 @@ usage = """
 FLUORIFY
 Usage:
   Fluorify [--output_folder=STRING] [--mol_name=STRING] [--ligand_name=STRING] [--complex_name=STRING] [--solvent_name=STRING]
-            [--yaml_path=STRING] [--o_atom_list=LIST] [--c_atom_list=LIST] [--h_atom_list=LIST] [--num_frames=INT] [--net_charge=INT]
-            [--gaff_ver=INT] [--equi=INT] [--num_fep=INT] [--auto_select=STRING] [--charge_only=BOOL] [--vdw_only=BOOL] [--optimize=BOOL]
-            [--num_gpu=INT] [--opt_name=STRING] [--rmsd=FLOAT] [--exclude_dualtopo=BOOL] [--opt_steps=INT] [--central_diff=BOOL] [--job_type=STRING]...
+            [--yaml_path=STRING] [--c_atom_list=LIST] [--h_atom_list=LIST] [--num_frames=INT] [--net_charge=INT]
+            [--gaff_ver=INT] [--equi=INT] [--num_fep=INT] [--auto_select=STRING] [--charge_only=BOOL] [--vdw_only=BOOL]
+            [--num_gpu=INT] [--exclude_dualtopo=BOOL] [--optimize] [--job_type=STRING]...
 """
 
 
@@ -133,6 +133,7 @@ def main(argv=None):
         exclude_dualtopo = int(args['--exclude_dualtopo'])
     else:
         exclude_dualtopo = True
+        logger.debug('Excluding dual topology from seeing itself')
 
     if args['--optimize']:
         opt = int(args['--optimize'])
@@ -143,22 +144,6 @@ def main(argv=None):
                          ' Please use https://github.com/adw62/Ligand_Charge_Optimiser')
     else:
         logger.debug('Scanning ligand...')
-        if args['--central_diff']:
-            raise ValueError('Finite difference method option only compatible with an optimization')
-        else:
-            central_diff = None
-        if args['--opt_name']:
-            raise ValueError('Optimization method option only compatible with an optimization')
-        else:
-            opt_name = None
-        if args['--opt_steps']:
-            raise ValueError('Number of optimization steps option only compatible with an optimization')
-        else:
-            opt_steps = None
-        if args['--rmsd']:
-            raise ValueError('Optimization rmsd option only compatible with an optimization')
-        else:
-            rmsd = None
         if args['--c_atom_list']:
             c_atom_list = []
             pairs = args['--c_atom_list']
@@ -189,20 +174,8 @@ def main(argv=None):
         else:
             h_atom_list = None
 
-        if args['--o_atom_list']:
-            o_atom_list = []
-            pairs = args['--o_atom_list']
-            pairs = pairs.replace(" ", "")
-            o_name = pairs.replace(",", "")
-            pairs = pairs.split('and')
-            for pair in pairs:
-                tmp = []
-                pair = pair.split(',')
-                for atom in pair:
-                    tmp.append(atom)
-                o_atom_list.append(tmp)
-        else:
-            o_atom_list = None
+        #vestiage of sulphur mutations not compatable with SSP
+        o_atom_list = None
 
         if args['--auto_select']:
             auto_select = args['--auto_select']
@@ -253,7 +226,7 @@ def main(argv=None):
         logger.debug(msg.format('number of FEP calculations', num_fep))
 
 
-    Fluorify(output_folder, mol_name, ligand_name, net_charge, complex_name, solvent_name,
-         job_type, auto_select, c_atom_list, h_atom_list, o_atom_list, num_frames, charge_only, vdw_only, gaff_ver,
-             opt, num_gpu, num_fep, equi, central_diff, opt_name, opt_steps, rmsd, exclude_dualtopo)
+    Fluorify(output_folder, mol_name, ligand_name, net_charge, complex_name, solvent_name, job_type, auto_select,
+             c_atom_list, h_atom_list, num_frames, charge_only, vdw_only, gaff_ver, num_gpu, num_fep, equi, exclude_dualtopo,
+             opt, o_atom_list)
 

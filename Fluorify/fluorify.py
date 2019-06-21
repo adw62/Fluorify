@@ -12,7 +12,6 @@ import numpy as np
 import shutil
 from simtk import unit
 import logging
-import copy
 
 logger = logging.getLogger(__name__)
 
@@ -21,8 +20,8 @@ e = unit.elementary_charges
 
 class Fluorify(object):
     def __init__(self, output_folder, mol_name, ligand_name, net_charge, complex_name, solvent_name, job_type,
-                 auto_select, c_atom_list, h_atom_list, o_atom_list, num_frames, charge_only, vdw_only, gaff_ver, opt, num_gpu,
-                 num_fep, equi, central_diff, opt_name, opt_steps, rmsd, exclude_dualtopo):
+                 auto_select, c_atom_list, h_atom_list, num_frames, charge_only, vdw_only, gaff_ver, num_gpu,
+                 num_fep, equi, exclude_dualtopo, opt, o_atom_list):
 
         self.output_folder = output_folder
         self.net_charge = net_charge
@@ -63,12 +62,12 @@ class Fluorify(object):
         if complex_ligand_atoms != solvent_ligand_atoms:
             raise ValueError('Names and or name casing and or atom order of ligand not matched across input files.'
                              'Charges will not be applied where expected')
+
         #write out atom names for convenience
-        if opt:
-            file = open('atom_names', 'w')
-            for name in self.mol2_ligand_atoms:
-                file.write('{}\n'.format(name))
-            file.close()
+        file = open('atom_names', 'w')
+        for name in self.mol2_ligand_atoms:
+            file.write('{}\n'.format(name))
+        file.close()
 
         input_files = input_files[1:3]
         self.complex_offset, self.solvent_offset = get_ligand_offset(input_files, self.mol2_ligand_atoms, ligand_name)
@@ -77,11 +76,6 @@ class Fluorify(object):
                                   net_charge=self.net_charge, gaff=self.gaff_ver)
 
         logger.debug('Loading complex and solvent systems...')
-        tests = ['SSP_convergence_test', 'FEP_convergence_test', 'FS_test']
-        run_dynamics = True
-        if opt == True:
-            if opt_name in tests:
-                run_dynamics = False
 
         #COMPLEX
         self.complex_sys = []
@@ -90,14 +84,14 @@ class Fluorify(object):
                                      offset=self.complex_offset, opt=opt, exclude_dualtopo=exclude_dualtopo))
         self.complex_sys.append([complex_sim_dir + complex_name + '.dcd'])
         self.complex_sys.append(complex_sim_dir + complex_name + '.pdb')
-        if run_dynamics:
-            if not os.path.isfile(self.complex_sys[1][0]):
-                self.complex_sys[1] = [complex_sim_dir + complex_name + '_gpu' + str(x) + '.dcd' for x in range(num_gpu)]
-                for name in self.complex_sys[1]:
-                    if not os.path.isfile(name):
-                        self.complex_sys[1] = self.complex_sys[0].run_parallel_dynamics(complex_sim_dir, complex_name,
-                                                                                        self.num_frames, equi, None)
-                        break
+
+        if not os.path.isfile(self.complex_sys[1][0]):
+            self.complex_sys[1] = [complex_sim_dir + complex_name + '_gpu' + str(x) + '.dcd' for x in range(num_gpu)]
+            for name in self.complex_sys[1]:
+                if not os.path.isfile(name):
+                    self.complex_sys[1] = self.complex_sys[0].run_parallel_dynamics(complex_sim_dir, complex_name,
+                                                                                    self.num_frames, equi, None)
+                    break
         #SOLVENT
         self.solvent_sys = []
         self.solvent_sys.append(FSim(ligand_name=ligand_name, sim_name=solvent_name, input_folder=input_folder,
@@ -105,14 +99,13 @@ class Fluorify(object):
                                      offset=self.solvent_offset, opt=opt, exclude_dualtopo=exclude_dualtopo))
         self.solvent_sys.append([solvent_sim_dir + solvent_name + '.dcd'])
         self.solvent_sys.append(solvent_sim_dir + solvent_name + '.pdb')
-        if run_dynamics:
-            if not os.path.isfile(self.solvent_sys[1][0]):
-                self.solvent_sys[1] = [solvent_sim_dir + solvent_name + '_gpu' + str(x) + '.dcd' for x in range(num_gpu)]
-                for name in self.solvent_sys[1]:
-                    if not os.path.isfile(name):
-                        self.solvent_sys[1] = self.solvent_sys[0].run_parallel_dynamics(solvent_sim_dir, solvent_name,
-                                                                                        self.num_frames, equi, None)
-                        break
+        if not os.path.isfile(self.solvent_sys[1][0]):
+            self.solvent_sys[1] = [solvent_sim_dir + solvent_name + '_gpu' + str(x) + '.dcd' for x in range(num_gpu)]
+            for name in self.solvent_sys[1]:
+                if not os.path.isfile(name):
+                    self.solvent_sys[1] = self.solvent_sys[0].run_parallel_dynamics(solvent_sim_dir, solvent_name,
+                                                                                    self.num_frames, equi, None)
+                    break
 
         Fluorify.scanning(self, wt_ligand, auto_select, c_atom_list, h_atom_list, o_atom_list)
 
@@ -485,7 +478,6 @@ def get_ligand_offset(input_files, mol2_ligand_atoms, ligand_name):
     offset = []
     for file in input_files:
         snapshot = md.load(file)
-        diff = snapshot.topology.select('resname {} and name {}'.format(ligand_name, mol2_ligand_atoms[0]))
         offset.append(snapshot.topology.select('resname {} and name {}'.format(ligand_name, mol2_ligand_atoms[0])))
     return tuple(offset)
 

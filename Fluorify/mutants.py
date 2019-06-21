@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 
-import time
 from simtk import unit
 import logging
 import copy
