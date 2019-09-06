@@ -246,7 +246,7 @@ class FSim(object):
 
         return pos, top, hydrogen_order, h_virt_excep, virt_excep_shift, f_exceptions, [ligand_ghost_atoms, ligand_ghost_exceptions]
 
-    def run_parallel_fep(self, mutant_params, system_idx, mutant_idx, n_steps, n_iterations, windows):
+    def run_parallel_fep(self, mutant_params, system_idx, mutant_idx, n_steps, n_iterations, windows, return_dg_matrix=False):
         logger.debug('Computing FEP for {}...'.format(self.name))
         if not self.opt:
             mutant_systems = mutant_params.build_fep_systems(system_idx, mutant_idx, windows)
@@ -269,9 +269,13 @@ class FSim(object):
         pool.close()
         pool.join()
         pool.terminate()
-        ddg = FSim.gather_dg(self, u_kln, nstates)
-
-        return ddg
+        DeltaF_ij, dDeltaF_ij = FSim.gather_dg(self, u_kln, nstates)
+        if return_dg_matrix:
+            return DeltaF_ij, dDeltaF_ij
+        else:
+            logger.debug("Relative free energy change for {0} = {1} +- {2}"
+                         .format(self.name, DeltaF_ij[0, nstates - 1] * self.kTtokcal, dDeltaF_ij[0, nstates - 1] * self.kTtokcal))
+            return DeltaF_ij[0, nstates - 1] * self.kTtokcal, dDeltaF_ij[0, nstates - 1] * self.kTtokcal
 
     def gather_dg(self, u_kln, nstates):
         u_kln = np.vstack(u_kln)
@@ -286,10 +290,8 @@ class FSim(object):
         mbar = MBAR(u_kln, N_k)
         [DeltaF_ij, dDeltaF_ij, _] = mbar.getFreeEnergyDifferences()
         logger.debug("Number of uncorrelated samples per state: {}".format(N_k))
-        logger.debug("Relative free energy change for {0} = {1} +- {2}"
-              .format(self.name, DeltaF_ij[0, nstates - 1]*self.kTtokcal, dDeltaF_ij[0, nstates - 1]*self.kTtokcal))
 
-        return DeltaF_ij[0, nstates - 1]*self.kTtokcal, dDeltaF_ij[0, nstates - 1]*self.kTtokcal
+        return DeltaF_ij, dDeltaF_ij
 
     def run_parallel_dynamics(self, output_folder, name, n_steps, equi, mutant_parameters):
         system = copy.deepcopy(self.wt_system)
