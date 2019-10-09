@@ -43,11 +43,11 @@ Perform Fluorine scanning analysis on trajectories.
 
     default: './setup.yaml'
       
-[--c_atom_list=LIST] List of indices of carbon atoms in ligand.mol2 to be replaced with N,
+[--c_atom_list=STRING] List of indices of carbon atoms in ligand.mol2 to be replaced with N,
 
     default: None
     
-[--h_atom_list=LIST] List of indices of hydrogen atoms in ligand.mol2 to be replaced with F or Cl
+[--h_atom_list=STRING] List of indices of hydrogen atoms in ligand.mol2 to be replaced with F or Cl
 
     default: None
     
@@ -103,5 +103,5 @@ Perform Fluorine scanning analysis on trajectories.
 
 Performs a fluorine scan of a ligand replacing hydrogens 13, 14 and 15. Uses 25ps of sampling equilibriated for 10fs to calculate the single step pertubation ddGs. Concludes with full FEP calculations for top three fluorinated mutants.
 
-    Fluorify --job_type='F' --num_frames='5' --equi='5' --h_atom_list='13, 14, 15' --yaml_path='./setup.yaml' --num_fep='3'
+    Fluorify --job_type='F' --num_frames=5 --equi=5 --h_atom_list='13, 14, 15' --yaml_path='./setup.yaml' --num_fep=3
 
