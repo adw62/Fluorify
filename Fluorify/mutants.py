@@ -91,6 +91,7 @@ class Mutants(object):
                         atom = int(atom-1)
                         transfer_params = copy.deepcopy(mutant_params[atom])
                         transfer_params = transfer_params['data']
+                        transfer_params = [transfer_params[0], 0.4*nm, 0.12*kj_mol]
                         mutant_params[atom] = {'id': atom, 'data': [0.0*e, 0.26*nm, 0.0*kj_mol]}
                         transfer_index = sys_virt_atoms.index(atom)
                         virt_id = nonbonded_ghosts[i][j][transfer_index]['id']
@@ -102,7 +103,7 @@ class Mutants(object):
         """
         :param params:
         :param mutations:
-        :param virt_exceptions: ghost from complex and solsvent systems
+        :param virt_exceptions: ghost from complex and solvent systems
         :param exception_order: order of vannila exceptions for complex and solvent systems
         :return:
         """
@@ -173,6 +174,8 @@ class Mutants(object):
                 else:
                     for k, excep1 in enumerate(mutant_parmas):
                         exception_ghosts[i][j][k]['data'] = zero
+
+
             """
             for x in exception_params[0][0]:
                 if x['data'][0] == 0.0*ee:

@@ -18,7 +18,7 @@ FLUORIFY
 Usage:
   Fluorify [--output_folder=STRING] [--mol_name=STRING] [--ligand_name=STRING] [--complex_name=STRING] [--solvent_name=STRING]
             [--yaml_path=STRING] [--c_atom_list=STRING] [--h_atom_list=STRING] [--num_frames=INT] [--net_charge=INT]
-            [--gaff_ver=INT] [--equi=INT] [--num_fep=INT] [--auto_select=STRING] [--charge_only=BOOL] [--vdw_only=BOOL]
+            [--gaff_ver=INT] [--equi=INT] [--num_fep=INT] [--auto_select=STRING] [--param=STRING]
             [--num_gpu=INT] [--exclude_dualtopo=BOOL] [--optimize] [--job_type=STRING]...
 """
 
@@ -112,20 +112,20 @@ def main(argv=None):
         gaff_ver = 2
         logger.debug(msg.format('gaff version', gaff_ver))
 
-    if args['--charge_only']:
-        charge_only = int(args['--charge_only'])
+    if args['--param']:
+        param = str(args['--param'])
+        accepted_param = ['charge', 'sigma', 'vdw', 'all']
+        if param not in accepted_param:
+            raise ValueError('param selected not in accepted params: {}'.format(accepted_param))
     else:
-        charge_only = False
-    if args['--vdw_only']:
-        vdw_only = int(args['--vdw_only'])
-    else:
-        vdw_only = False
-    if charge_only and vdw_only:
-        raise ValueError('charge_only and vdw_only conflicting options')
-    if charge_only == True:
+        param = 'all'
+
+    if param == 'charge':
         logger.debug('Mutating ligand charges only...')
-    elif vdw_only == True:
+    elif param == 'vdw':
         logger.debug('Mutating ligand VDW only...')
+    elif param == 'sigma':
+        logger.debug('Mutating ligand sigmas only...')
     else:
         logger.debug('Mutating all ligand parameters...')
 
@@ -227,6 +227,6 @@ def main(argv=None):
 
 
     Fluorify(output_folder, mol_name, ligand_name, net_charge, complex_name, solvent_name, job_type, auto_select,
-             c_atom_list, h_atom_list, num_frames, charge_only, vdw_only, gaff_ver, num_gpu, num_fep, equi, exclude_dualtopo,
+             c_atom_list, h_atom_list, num_frames, param, gaff_ver, num_gpu, num_fep, equi, exclude_dualtopo,
              opt, o_atom_list)
 

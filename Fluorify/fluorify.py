@@ -20,7 +20,7 @@ e = unit.elementary_charges
 
 class Fluorify(object):
     def __init__(self, output_folder, mol_name, ligand_name, net_charge, complex_name, solvent_name, job_type,
-                 auto_select, c_atom_list, h_atom_list, num_frames, charge_only, vdw_only, gaff_ver, num_gpu,
+                 auto_select, c_atom_list, h_atom_list, num_frames, param, gaff_ver, num_gpu,
                  num_fep, equi, exclude_dualtopo, opt, o_atom_list):
 
         self.output_folder = output_folder
@@ -74,7 +74,7 @@ class Fluorify(object):
         #COMPLEX
         self.complex_sys = []
         self.complex_sys.append(FSim(ligand_name=ligand_name, sim_name=complex_name, input_folder=input_folder,
-                                     charge_only=charge_only, vdw_only=vdw_only, num_gpu=num_gpu,
+                                     param=param, num_gpu=num_gpu,
                                      offset=self.complex_offset, opt=opt, exclude_dualtopo=exclude_dualtopo))
         self.complex_sys.append([complex_sim_dir + complex_name + '.dcd'])
         self.complex_sys.append(complex_sim_dir + complex_name + '.pdb')
@@ -89,7 +89,7 @@ class Fluorify(object):
         #SOLVENT
         self.solvent_sys = []
         self.solvent_sys.append(FSim(ligand_name=ligand_name, sim_name=solvent_name, input_folder=input_folder,
-                                     charge_only=charge_only, vdw_only=vdw_only, num_gpu=num_gpu,
+                                     param=param, num_gpu=num_gpu,
                                      offset=self.solvent_offset, opt=opt, exclude_dualtopo=exclude_dualtopo))
         self.solvent_sys.append([solvent_sim_dir + solvent_name + '.dcd'])
         self.solvent_sys.append(solvent_sim_dir + solvent_name + '.pdb')
@@ -372,7 +372,7 @@ def add_sulphurs(mol, new_element, auto_select, atom_list):
         atom_list = Mol2.get_atom_by_string(mol, oxygen_type)
         atom_list = [[x] for x in atom_list]
     mutated_systems = Mol2.mutate(mol, atom_list, new_element)
-    #should check this is a double bonded sulphr with only carbon neighbours
+    #should check this is a double bonded sulphur with only carbon neighbours
 
     #Build list of dictionaries each dict describes mutation applied corresponding system
     for i, mutant in enumerate(mutated_systems):
