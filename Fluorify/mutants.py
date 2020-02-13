@@ -91,7 +91,6 @@ class Mutants(object):
                         atom = int(atom-1)
                         transfer_params = copy.deepcopy(mutant_params[atom])
                         transfer_params = transfer_params['data']
-                        transfer_params = [transfer_params[0], 0.4*nm, 0.12*kj_mol]
                         mutant_params[atom] = {'id': atom, 'data': [0.0*e, 0.26*nm, 0.0*kj_mol]}
                         transfer_index = sys_virt_atoms.index(atom)
                         virt_id = nonbonded_ghosts[i][j][transfer_index]['id']
