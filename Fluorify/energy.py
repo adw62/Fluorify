@@ -22,7 +22,8 @@ kj_mol = unit.kilojoules_per_mole
 
 class FSim(object):
     def __init__(self, ligand_name, sim_name, input_folder, param, num_gpu, offset, opt, exclude_dualtopo,
-                 temperature=300*unit.kelvin, friction=0.3/unit.picosecond, timestep=2.0*unit.femtosecond):
+                 temperature=300*unit.kelvin, friction=0.3/unit.picosecond, timestep=2.0*unit.femtosecond,
+                 const_prefactors=None, weights=None):
         """ A class for creating OpenMM context from input files and calculating free energy
         change when modifying the parameters of the system in the context.
 
@@ -79,22 +80,66 @@ class FSim(object):
         self.torsion_list = self.ligand_lists[2]
         self.angle_list = self.ligand_lists[3]
 
+        #Set const prefactors to 1.0 this will have no effect on constraint lenght
+        if const_prefactors is None:
+            const_prefactors = FSim.default_const(self)
+
+        # Modify constraints
+        constraints = FSim.get_constraints(self, system, snapshot, ligand_name)
+        # const_prefactor must be in order of carbons
+        mod_constraints = FSim.mod_constraints(self, constraints, const_prefactors)
+        FSim.set_arb_constraints(self, system, mod_constraints)
+        r = FSim.get_constraints(self, system, snapshot, ligand_name)
+
+        #defualt weights for fluorine #1.340Ang/1.083Ang -1 = 0.24
+        if weights is None:
+            weights = [0.24 for x in constraints]
+
         self.virt_atom_shift = nonbonded_force.getNumParticles()
         #Add dual topology
-        if not self.opt:
-            self.extended_pos, self.extended_top, self.virt_atom_order, self.h_virt_excep, self.virt_excep_shift, self.zero_exceptions,\
-            self.ghost_ligand_info = self.add_all_virtual(system, nonbonded_force, bond_force, snapshot, ligand_name)
-            f = open(sim_dir + sim_name + '.pdb', 'w')
-            mm.app.pdbfile.PDBFile.writeFile(self.extended_top, self.extended_pos, f)
-            f.close()
+        self.extended_pos, self.extended_top, self.virt_atom_order, self.h_virt_excep, self.virt_excep_shift, self.zero_exceptions,\
+        self.ghost_ligand_info = self.add_all_virtual(system, nonbonded_force, bond_force, snapshot, ligand_name, weights)
+        f = open(sim_dir + sim_name + '.pdb', 'w')
+        mm.app.pdbfile.PDBFile.writeFile(self.extended_top, self.extended_pos, f)
+        f.close()
 
         self.extended_pdb = mm.app.pdbfile.PDBFile(sim_dir + sim_name + '.pdb')
         self.wt_system = system
 
-    def add_all_virtual(self, system, nonbonded_force, bonded_force, snapshot, ligand_name):
-        return FSim.add_fluorine(self, system, nonbonded_force, snapshot, ligand_name, weight=0.5)
+    def default_const(self):
+        yield 1.0
 
-    def add_sulphur(self, system, nonbonded_force, bonded_force, snapshot, ligand_name):
+    def mod_constraints(self, constraints, pre_factor):
+        for i, (x, p) in enumerate(zip(constraints, pre_factor)):
+            constraints[i][3] = x[3]*p
+        return constraints
+
+    def get_constraints(self, system, snapshot, ligand_name):
+        const = []
+        carbons = list(snapshot.topology.select('element C and resname {}'.format(ligand_name)))
+        hydrogens = list(snapshot.topology.select('element H and resname {}'.format(ligand_name)))
+        for index in range(system.getNumConstraints()):
+            i, j, r = system.getConstraintParameters(index)
+            if i in carbons and j in hydrogens:
+                #4th index lets us swap i and j after a sort using carbon indexes
+                const.append([index, i, j, r, 0])
+            if j in carbons and i in hydrogens:
+                const.append([index, j, i, r, 1])
+        #Sort into order of carbons
+        const = sorted(const, key=lambda x: x[1])
+        #correct i, j order back to that of system constraints
+        const = [x[:4] if x[4] == 0 else [x[0], x[2], x[1], x[3]] for x in const]
+        print(const)
+        return const
+
+    def set_arb_constraints(self, system, arb_constraints):
+        for const in arb_constraints:
+            system.setConstraintParameters(*const)
+
+    def add_all_virtual(self, system, nonbonded_force, bonded_force, snapshot, ligand_name, weights):
+        return FSim.add_fluorine(self, system, nonbonded_force, snapshot, ligand_name, weights)
+
+    def add_sulphur(self, system, nonbonded_force, bonded_force, snapshot, ligand_name, weights):
         pos = list(snapshot.xyz[0]*10)
         top = self.input_pdb.topology
 
@@ -117,7 +162,7 @@ class FSim(object):
         element = app.element.sulphur
         chain = top.addChain()
         res = top.addResidue('SUL', chain)
-        s_weight = 0.3 #1.6Ang/1.2Ang - 1
+        #s_weight = weights #1.6Ang/1.2Ang - 1
 
         ligand_ghost_bonds = []
         ligand_ghost_atoms = []
@@ -125,7 +170,7 @@ class FSim(object):
 
         o_exceptions = []
         s_exceptions = []
-        for new_atom in bond_list:
+        for new_atom, weight in zip(bond_list, weights):
             exceptions = []
             system.addParticle(0.00)
             x, y, z = tuple(snapshot.xyz[0, new_atom[0], :]*10)
@@ -133,7 +178,7 @@ class FSim(object):
             atom_added = nonbonded_force.addParticle(0.0, 1.0, 0.0)
             bonded_force.addBond(atom_added, new_atom[1], 0.15*nm, 0.0*kj_mol/(nm**2))
             ligand_ghost_atoms.append(atom_added)
-            vs = mm.TwoParticleAverageSite(new_atom[0], new_atom[1], 1+s_weight, -s_weight)
+            vs = mm.TwoParticleAverageSite(new_atom[0], new_atom[1], 1+weight, -weight)
             system.setVirtualSite(atom_added, vs)
             #If ligand is over 1000 atoms there will be repeated names
             atom1 = top.addAtom('S{}'.format(abs(new_atom[0]) % 1000), element, res)
@@ -166,7 +211,7 @@ class FSim(object):
 
         return pos, top, oxygen_order, o_virt_excep, virt_excep_shift, s_exceptions, [ligand_ghost_atoms, ligand_ghost_exceptions, ligand_ghost_bonds]
 
-    def add_fluorine(self, system, nonbonded_force, snapshot, ligand_name, weight=0.24):
+    def add_fluorine(self, system, nonbonded_force, snapshot, ligand_name, weights):
         pos = list(snapshot.xyz[0]*10)
         top = self.input_pdb.topology
 
@@ -189,7 +234,6 @@ class FSim(object):
         element = app.element.fluorine
         chain = top.addChain()
         res = top.addResidue('FLU', chain)
-        f_weight = weight #1.340Ang/1.083Ang -1 = 0.24
         #f_charge = -0.2463
         #f_sig = 0.3034222854639816
         #f_eps = 0.3481087995050717
@@ -200,7 +244,7 @@ class FSim(object):
         h_exceptions = []
         f_exceptions = []
         all_new_atoms = []
-        for new_atom in bond_list:
+        for new_atom, weight in zip(bond_list, weights):
             exceptions = []
             system.addParticle(0.00)
             x, y, z = tuple(snapshot.xyz[0, new_atom[0], :]*10)
@@ -208,7 +252,7 @@ class FSim(object):
             atom_added = nonbonded_force.addParticle(0.0, 1.0, 0.0)
             all_new_atoms.append(atom_added)
             ligand_ghost_atoms.append(atom_added)
-            vs = mm.TwoParticleAverageSite(new_atom[0], new_atom[1], 1+f_weight, -f_weight)
+            vs = mm.TwoParticleAverageSite(new_atom[0], new_atom[1], 1+weight, -weight)
             system.setVirtualSite(atom_added, vs)
             #If ligand is over 1000 atoms there will be repeated names
             top.addAtom('F{}'.format(abs(new_atom[0]) % 1000), element, res)
