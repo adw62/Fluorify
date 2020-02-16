@@ -22,8 +22,7 @@ kj_mol = unit.kilojoules_per_mole
 
 class FSim(object):
     def __init__(self, ligand_name, sim_name, input_folder, param, num_gpu, offset, opt, exclude_dualtopo,
-                 temperature=300*unit.kelvin, friction=0.3/unit.picosecond, timestep=2.0*unit.femtosecond,
-                 const_prefactors=None, weights=None):
+                 temperature=300*unit.kelvin, friction=0.3/unit.picosecond, timestep=2.0*unit.femtosecond):
         """ A class for creating OpenMM context from input files and calculating free energy
         change when modifying the parameters of the system in the context.
 
@@ -41,18 +40,24 @@ class FSim(object):
         self.param = param
         self.name = sim_name
         self.kT = kB * self.temperature
+        self.ligand_name = ligand_name
         kcal = 4.1868 * unit.kilojoules_per_mole
         self.kTtokcal = self.kT/kcal * unit.kilocalories_per_mole
         #Create system from input files
         sim_dir = input_folder + sim_name + '/'
-        sim_name = sim_name
-        snapshot = md.load(sim_dir + sim_name + '.pdb')
-        self.input_pdb = mm.app.pdbfile.PDBFile(sim_dir + sim_name + '.pdb')
-        parameters_file_path = sim_dir + sim_name + '.prmtop'
-        self.parameters_file = mm.app.AmberPrmtopFile(parameters_file_path)
-        system = self.parameters_file.createSystem(nonbondedMethod=app.PME, nonbondedCutoff=1.1*unit.nanometers,
-                                              constraints=app.HBonds, rigidWater=True, ewaldErrorTolerance=0.0005)
-        #seperate forces into sperate groups
+        self.pdb_name = sim_dir + sim_name
+        self.snapshot = md.load(self.pdb_name+ '.pdb')
+        self.input_pdb = mm.app.pdbfile.PDBFile(self.pdb_name+ '.pdb')
+        self.parameters_file_path = sim_dir + sim_name + '.prmtop'
+
+        FSim.build(self)
+
+    def build(self, const_prefactors=None, weights=None):
+
+        self.parameters_file = mm.app.AmberPrmtopFile(self.parameters_file_path)
+        system = self.parameters_file.createSystem(nonbondedMethod=app.PME, nonbondedCutoff=1.1 * unit.nanometers,
+                                                   constraints=app.HBonds, rigidWater=True, ewaldErrorTolerance=0.0005)
+        # seperate forces into sperate groups
         for force_index, force in enumerate(system.getForces()):
             if isinstance(force, mm.NonbondedForce):
                 nonbonded_force = force
@@ -68,11 +73,11 @@ class FSim(object):
                 self.angle_index = force_index
             force.setForceGroup(force_index)
 
-        #add switching function
-        nonbonded_force.setSwitchingDistance(0.9*unit.nanometers)
+        # add switching function
+        nonbonded_force.setSwitchingDistance(0.9 * unit.nanometers)
         nonbonded_force.setUseSwitchingFunction(True)
 
-        self.ligand_info, self.ligand_lists = get_ligand_info(ligand_name, snapshot, nonbonded_force,
+        self.ligand_info, self.ligand_lists = get_ligand_info(self.ligand_name, self.snapshot, nonbonded_force,
                                                               bond_force, torsion_force, angle_force)
 
         self.exceptions_list = self.ligand_lists[0]
@@ -85,25 +90,26 @@ class FSim(object):
             const_prefactors = FSim.default_const(self)
 
         # Modify constraints
-        constraints = FSim.get_constraints(self, system, snapshot, ligand_name)
+        constraints = FSim.get_constraints(self, system)
         # const_prefactor must be in order of carbons
         mod_constraints = FSim.mod_constraints(self, constraints, const_prefactors)
         FSim.set_arb_constraints(self, system, mod_constraints)
-        r = FSim.get_constraints(self, system, snapshot, ligand_name)
+        r = FSim.get_constraints(self, system)
 
-        #defualt weights for fluorine #1.340Ang/1.083Ang -1 = 0.24
+        #defualt weights for fluorine #1.340Ang/1.083Ang = 1.24
         if weights is None:
-            weights = [0.24 for x in constraints]
+            weights = [1.24 for x in constraints]
 
         self.virt_atom_shift = nonbonded_force.getNumParticles()
         #Add dual topology
         self.extended_pos, self.extended_top, self.virt_atom_order, self.h_virt_excep, self.virt_excep_shift, self.zero_exceptions,\
-        self.ghost_ligand_info = self.add_all_virtual(system, nonbonded_force, bond_force, snapshot, ligand_name, weights)
-        f = open(sim_dir + sim_name + '.pdb', 'w')
+        self.ghost_ligand_info = self.add_all_virtual(system, nonbonded_force, bond_force, weights)
+
+        f = open(self.pdb_name+'_extended.pdb', 'w')
         mm.app.pdbfile.PDBFile.writeFile(self.extended_top, self.extended_pos, f)
         f.close()
 
-        self.extended_pdb = mm.app.pdbfile.PDBFile(sim_dir + sim_name + '.pdb')
+        self.extended_pdb = mm.app.pdbfile.PDBFile(self.pdb_name+'_extended.pdb')
         self.wt_system = system
 
     def default_const(self):
@@ -114,10 +120,10 @@ class FSim(object):
             constraints[i][3] = x[3]*p
         return constraints
 
-    def get_constraints(self, system, snapshot, ligand_name):
+    def get_constraints(self, system):
         const = []
-        carbons = list(snapshot.topology.select('element C and resname {}'.format(ligand_name)))
-        hydrogens = list(snapshot.topology.select('element H and resname {}'.format(ligand_name)))
+        carbons = list(self.snapshot.topology.select('element C and resname {}'.format(self.ligand_name)))
+        hydrogens = list(self.snapshot.topology.select('element H and resname {}'.format(self.ligand_name)))
         for index in range(system.getNumConstraints()):
             i, j, r = system.getConstraintParameters(index)
             if i in carbons and j in hydrogens:
@@ -129,96 +135,24 @@ class FSim(object):
         const = sorted(const, key=lambda x: x[1])
         #correct i, j order back to that of system constraints
         const = [x[:4] if x[4] == 0 else [x[0], x[2], x[1], x[3]] for x in const]
-        print(const)
+        #print(const)
         return const
 
     def set_arb_constraints(self, system, arb_constraints):
         for const in arb_constraints:
             system.setConstraintParameters(*const)
 
-    def add_all_virtual(self, system, nonbonded_force, bonded_force, snapshot, ligand_name, weights):
-        return FSim.add_fluorine(self, system, nonbonded_force, snapshot, ligand_name, weights)
+    def add_all_virtual(self, system, nonbonded_force, bonded_force, weights):
+        return FSim.add_fluorine(self, system, nonbonded_force, weights)
 
-    def add_sulphur(self, system, nonbonded_force, bonded_force, snapshot, ligand_name, weights):
-        pos = list(snapshot.xyz[0]*10)
-        top = self.input_pdb.topology
-
-        bond_list = []
-        oxygen_order = []
-        carbons = list(snapshot.topology.select('element C and resname {}'.format(ligand_name)))
-        oxygens = list(snapshot.topology.select('element O and resname {}'.format(ligand_name)))
-        for index in range(bonded_force.getNumBonds()):
-            i, j, r, k = bonded_force.getBondParameters(index)
-            if i in carbons and j in oxygens:
-                bond_list.append([j, i])
-                oxygen_order.append(j-self.offset)
-            if j in carbons and i in oxygens:
-                bond_list.append([i, j])
-                oxygen_order.append(i-self.offset)
-
-        oxygen_order = sorted(oxygen_order)
-        bond_list = sorted(bond_list)
-
-        element = app.element.sulphur
-        chain = top.addChain()
-        res = top.addResidue('SUL', chain)
-        #s_weight = weights #1.6Ang/1.2Ang - 1
-
-        ligand_ghost_bonds = []
-        ligand_ghost_atoms = []
-        ligand_ghost_exceptions = []
-
-        o_exceptions = []
-        s_exceptions = []
-        for new_atom, weight in zip(bond_list, weights):
-            exceptions = []
-            system.addParticle(0.00)
-            x, y, z = tuple(snapshot.xyz[0, new_atom[0], :]*10)
-            pos.extend([[x, y, z]])
-            atom_added = nonbonded_force.addParticle(0.0, 1.0, 0.0)
-            bonded_force.addBond(atom_added, new_atom[1], 0.15*nm, 0.0*kj_mol/(nm**2))
-            ligand_ghost_atoms.append(atom_added)
-            vs = mm.TwoParticleAverageSite(new_atom[0], new_atom[1], 1+weight, -weight)
-            system.setVirtualSite(atom_added, vs)
-            #If ligand is over 1000 atoms there will be repeated names
-            atom1 = top.addAtom('S{}'.format(abs(new_atom[0]) % 1000), element, res)
-            for x in top.atoms():
-                if x.index == new_atom[1]:
-                    atom2 = x
-            top.addBond(atom1, atom2)
-            #here the sulphur will inherited the exception of its parent oxygen
-            for exception_index in range(nonbonded_force.getNumExceptions()):
-                [iatom, jatom, chargeprod, sigma, epsilon] = nonbonded_force.getExceptionParameters(exception_index)
-                if jatom == new_atom[0]:
-                    if iatom in self.ligand_info[0]:
-                        o_exceptions.append([iatom, jatom])
-                        #Exceptions must be initialized as non-zero so we can change them later (openmm constraint)
-                        #these are zeroed later in the code to simulate the physical system see func. zero_ghost_exceptions
-                        exceptions.append([iatom, atom_added, 0.1, 0.1, 0.1])
-                if iatom == new_atom[0]:
-                    if jatom in self.ligand_info[0]:
-                        o_exceptions.append([jatom, iatom])
-                        exceptions.append([jatom, atom_added, 0.1, 0.1, 0.1])
-            for i, exception in enumerate(exceptions):
-                idx = nonbonded_force.addException(*exception)
-                s_exceptions.append([idx, exception[0], exception[1], 0.0, 0.1, 0.0])
-                ligand_ghost_exceptions.append(idx)
-
-            nonbonded_force.addException(atom_added, new_atom[0], 0.0, 0.1, 0.0, False)
-
-        virt_excep_shift = [[x[0], y[2]-x[1]] for x, y in zip(o_exceptions, s_exceptions)]
-        o_virt_excep = [frozenset((x[0], x[1])) for x in o_exceptions]
-
-        return pos, top, oxygen_order, o_virt_excep, virt_excep_shift, s_exceptions, [ligand_ghost_atoms, ligand_ghost_exceptions, ligand_ghost_bonds]
-
-    def add_fluorine(self, system, nonbonded_force, snapshot, ligand_name, weights):
-        pos = list(snapshot.xyz[0]*10)
-        top = self.input_pdb.topology
+    def add_fluorine(self, system, nonbonded_force, weights):
+        pos = list(self.snapshot.xyz[0]*10)
+        top = copy.deepcopy(self.input_pdb.topology)
 
         bond_list = []
         hydrogen_order = []
-        carbons = list(snapshot.topology.select('element C and resname {}'.format(ligand_name)))
-        hydrogens = list(snapshot.topology.select('element H and resname {}'.format(ligand_name)))
+        carbons = list(self.snapshot.topology.select('element C and resname {}'.format(self.ligand_name)))
+        hydrogens = list(self.snapshot.topology.select('element H and resname {}'.format(self.ligand_name)))
         for index in range(system.getNumConstraints()):
             i, j, r = system.getConstraintParameters(index)
             if i in carbons and j in hydrogens:
@@ -247,12 +181,12 @@ class FSim(object):
         for new_atom, weight in zip(bond_list, weights):
             exceptions = []
             system.addParticle(0.00)
-            x, y, z = tuple(snapshot.xyz[0, new_atom[0], :]*10)
+            x, y, z = tuple(self.snapshot.xyz[0, new_atom[0], :]*10)
             pos.extend([[x, y, z]])
             atom_added = nonbonded_force.addParticle(0.0, 1.0, 0.0)
             all_new_atoms.append(atom_added)
             ligand_ghost_atoms.append(atom_added)
-            vs = mm.TwoParticleAverageSite(new_atom[0], new_atom[1], 1+weight, -weight)
+            vs = mm.TwoParticleAverageSite(new_atom[0], new_atom[1], weight, 1-weight)
             system.setVirtualSite(atom_added, vs)
             #If ligand is over 1000 atoms there will be repeated names
             top.addAtom('F{}'.format(abs(new_atom[0]) % 1000), element, res)
@@ -390,9 +324,9 @@ class FSim(object):
             force.setAngleParameters(angle_idx, particle_idxs[0], particle_idxs[1], particle_idxs[2], data[0], data[1])
 
     def mod_params(self, charge, sigma, epsilon, nonbonded_params):
-        if 'charge' and 'VDW' in self.param or 'all' in self.param:
+        if 'charge' in self.param and 'VDW' in self.param or 'all' in self.param:
             charge, sigma, eps = nonbonded_params
-        elif 'charge' and 'sigma' in self.param:
+        elif 'charge' in self.param and 'sigma' in self.param:
             charge, sigma = nonbonded_params[:2]
         elif 'charge' in self.param:
             charge = nonbonded_params[0]
