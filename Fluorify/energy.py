@@ -85,12 +85,11 @@ class FSim(object):
         self.torsion_list = self.ligand_lists[2]
         self.angle_list = self.ligand_lists[3]
 
-        #Set const prefactors to 1.0 this will have no effect on constraint lenght
-        if const_prefactors is None:
-            const_prefactors = FSim.default_const(self)
-
         # Modify constraints
         constraints = FSim.get_constraints(self, system)
+        # Set const prefactors to 1.0 this will have no effect on constraint lenght
+        if const_prefactors is None:
+            const_prefactors = [1.0 for x in constraints]
         # const_prefactor must be in order of carbons
         mod_constraints = FSim.mod_constraints(self, constraints, const_prefactors)
         FSim.set_arb_constraints(self, system, mod_constraints)
@@ -112,11 +111,10 @@ class FSim(object):
         self.extended_pdb = mm.app.pdbfile.PDBFile(self.pdb_name+'_extended.pdb')
         self.wt_system = system
 
-    def default_const(self):
-        yield 1.0
-
     def mod_constraints(self, constraints, pre_factor):
         for i, (x, p) in enumerate(zip(constraints, pre_factor)):
+            if pre_factor is None:
+                raise ValueError()
             constraints[i][3] = x[3]*p
         return constraints
 
@@ -239,7 +237,7 @@ class FSim(object):
         pool = Pool(processes=self.num_gpu)
 
         system = copy.deepcopy(self.wt_system)
-        box_vectors = self.input_pdb.topology.getPeriodicBoxVectors()
+        box_vectors = self.extended_pdb.topology.getPeriodicBoxVectors()
         system.setDefaultPeriodicBoxVectors(*box_vectors)
         system.addForce(mm.MonteCarloBarostat(1 * unit.atmospheres, self.temperature * unit.kelvin, 25))###
 
@@ -283,7 +281,7 @@ class FSim(object):
             self.apply_nonbonded_parameters(non_bonded_force, mutant_parameters[0], mutant_parameters[1],
                                             mutant_parameters[2], mutant_parameters[3])
 
-        box_vectors = self.input_pdb.topology.getPeriodicBoxVectors()
+        box_vectors = self.extended_pdb.topology.getPeriodicBoxVectors()
         system.setDefaultPeriodicBoxVectors(*box_vectors)
         system.addForce(mm.MonteCarloBarostat(1 * unit.atmospheres, self.temperature * unit.kelvin, 25))###
 
