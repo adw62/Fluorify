@@ -20,6 +20,8 @@ kB = 0.008314472471220214 * unit.kilojoules_per_mole/unit.kelvin
 nm = unit.nanometer
 kj_mol = unit.kilojoules_per_mole
 
+dummy = -8888
+
 class FSim(object):
     def __init__(self, ligand_name, sim_name, input_folder, param, num_gpu, offset, opt, exclude_dualtopo,
                  temperature=300*unit.kelvin, friction=0.3/unit.picosecond, timestep=2.0*unit.femtosecond):
@@ -113,9 +115,10 @@ class FSim(object):
 
     def mod_constraints(self, constraints, pre_factor):
         for i, (x, p) in enumerate(zip(constraints, pre_factor)):
-            if pre_factor is None:
+            if p == dummy:
                 raise ValueError()
             constraints[i][3] = x[3]*p
+
         return constraints
 
     def get_constraints(self, system):
@@ -133,7 +136,6 @@ class FSim(object):
         const = sorted(const, key=lambda x: x[1])
         #correct i, j order back to that of system constraints
         const = [x[:4] if x[4] == 0 else [x[0], x[2], x[1], x[3]] for x in const]
-        #print(const)
         return const
 
     def set_arb_constraints(self, system, arb_constraints):
@@ -370,7 +372,7 @@ class FSim(object):
             charge_prod, sigma, epsilon = FSim.mod_params(self, charge_prod, sigma, epsilon, excep_params)
             force.setExceptionParameters(excep_idx, p1, p2, charge_prod, sigma, epsilon)
 
-        # GHOST/dual topo
+        # GHOST/dual topo exceptions
         for i, (index, shift) in enumerate(zip(self.ghost_ligand_info[1], self.virt_excep_shift)):
             excep_idx = int(index)
             excep_params = ghost_excep[i]['data']
