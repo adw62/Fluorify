@@ -25,7 +25,6 @@ class FSim(object):
                  temperature=300*unit.kelvin, friction=0.3/unit.picosecond, timestep=2.0*unit.femtosecond):
         """ A class for creating OpenMM context from input files and calculating free energy
         change when modifying the parameters of the system in the context.
-
         ligand_name : resname of ligand in input files
         sim_name: complex or solvent
         input_folder: input directory
@@ -80,91 +79,19 @@ class FSim(object):
         self.angle_list = self.ligand_lists[3]
 
         self.virt_atom_shift = nonbonded_force.getNumParticles()
+
         #Add dual topology
-        if not self.opt:
-            self.extended_pos, self.extended_top, self.virt_atom_order, self.h_virt_excep, self.virt_excep_shift, self.zero_exceptions,\
-            self.ghost_ligand_info = self.add_all_virtual(system, nonbonded_force, bond_force, snapshot, ligand_name)
-            f = open(sim_dir + sim_name + '.pdb', 'w')
-            mm.app.pdbfile.PDBFile.writeFile(self.extended_top, self.extended_pos, f)
-            f.close()
+        self.extended_pos, self.extended_top, self.virt_atom_order, self.h_virt_excep, self.virt_excep_shift, self.zero_exceptions,\
+        self.ghost_ligand_info = self.add_all_virtual(system, nonbonded_force, bond_force, snapshot, ligand_name)
+        f = open(sim_dir + sim_name + '.pdb', 'w')
+        mm.app.pdbfile.PDBFile.writeFile(self.extended_top, self.extended_pos, f)
+        f.close()
 
         self.extended_pdb = mm.app.pdbfile.PDBFile(sim_dir + sim_name + '.pdb')
         self.wt_system = system
 
     def add_all_virtual(self, system, nonbonded_force, bonded_force, snapshot, ligand_name):
         return FSim.add_fluorine(self, system, nonbonded_force, snapshot, ligand_name, weight=0.5)
-
-    def add_sulphur(self, system, nonbonded_force, bonded_force, snapshot, ligand_name):
-        pos = list(snapshot.xyz[0]*10)
-        top = self.input_pdb.topology
-
-        bond_list = []
-        oxygen_order = []
-        carbons = list(snapshot.topology.select('element C and resname {}'.format(ligand_name)))
-        oxygens = list(snapshot.topology.select('element O and resname {}'.format(ligand_name)))
-        for index in range(bonded_force.getNumBonds()):
-            i, j, r, k = bonded_force.getBondParameters(index)
-            if i in carbons and j in oxygens:
-                bond_list.append([j, i])
-                oxygen_order.append(j-self.offset)
-            if j in carbons and i in oxygens:
-                bond_list.append([i, j])
-                oxygen_order.append(i-self.offset)
-
-        oxygen_order = sorted(oxygen_order)
-        bond_list = sorted(bond_list)
-
-        element = app.element.sulphur
-        chain = top.addChain()
-        res = top.addResidue('SUL', chain)
-        s_weight = 0.3 #1.6Ang/1.2Ang - 1
-
-        ligand_ghost_bonds = []
-        ligand_ghost_atoms = []
-        ligand_ghost_exceptions = []
-
-        o_exceptions = []
-        s_exceptions = []
-        for new_atom in bond_list:
-            exceptions = []
-            system.addParticle(0.00)
-            x, y, z = tuple(snapshot.xyz[0, new_atom[0], :]*10)
-            pos.extend([[x, y, z]])
-            atom_added = nonbonded_force.addParticle(0.0, 1.0, 0.0)
-            bonded_force.addBond(atom_added, new_atom[1], 0.15*nm, 0.0*kj_mol/(nm**2))
-            ligand_ghost_atoms.append(atom_added)
-            vs = mm.TwoParticleAverageSite(new_atom[0], new_atom[1], 1+s_weight, -s_weight)
-            system.setVirtualSite(atom_added, vs)
-            #If ligand is over 1000 atoms there will be repeated names
-            atom1 = top.addAtom('S{}'.format(abs(new_atom[0]) % 1000), element, res)
-            for x in top.atoms():
-                if x.index == new_atom[1]:
-                    atom2 = x
-            top.addBond(atom1, atom2)
-            #here the sulphur will inherited the exception of its parent oxygen
-            for exception_index in range(nonbonded_force.getNumExceptions()):
-                [iatom, jatom, chargeprod, sigma, epsilon] = nonbonded_force.getExceptionParameters(exception_index)
-                if jatom == new_atom[0]:
-                    if iatom in self.ligand_info[0]:
-                        o_exceptions.append([iatom, jatom])
-                        #Exceptions must be initialized as non-zero so we can change them later (openmm constraint)
-                        #these are zeroed later in the code to simulate the physical system see func. zero_ghost_exceptions
-                        exceptions.append([iatom, atom_added, 0.1, 0.1, 0.1])
-                if iatom == new_atom[0]:
-                    if jatom in self.ligand_info[0]:
-                        o_exceptions.append([jatom, iatom])
-                        exceptions.append([jatom, atom_added, 0.1, 0.1, 0.1])
-            for i, exception in enumerate(exceptions):
-                idx = nonbonded_force.addException(*exception)
-                s_exceptions.append([idx, exception[0], exception[1], 0.0, 0.1, 0.0])
-                ligand_ghost_exceptions.append(idx)
-
-            nonbonded_force.addException(atom_added, new_atom[0], 0.0, 0.1, 0.0, False)
-
-        virt_excep_shift = [[x[0], y[2]-x[1]] for x, y in zip(o_exceptions, s_exceptions)]
-        o_virt_excep = [frozenset((x[0], x[1])) for x in o_exceptions]
-
-        return pos, top, oxygen_order, o_virt_excep, virt_excep_shift, s_exceptions, [ligand_ghost_atoms, ligand_ghost_exceptions, ligand_ghost_bonds]
 
     def add_fluorine(self, system, nonbonded_force, snapshot, ligand_name, weight=0.24):
         pos = list(snapshot.xyz[0]*10)
@@ -248,20 +175,20 @@ class FSim(object):
 
         return pos, top, hydrogen_order, h_virt_excep, virt_excep_shift, f_exceptions, [ligand_ghost_atoms, ligand_ghost_exceptions]
 
-    def run_parallel_fep(self, mutant_params, system_idx, mutant_idx, n_steps, n_iterations, windows, return_dg_matrix=False):
-        logger.debug('Computing FEP for {}...'.format(self.name))
-        if not self.opt:
-            mutant_systems = mutant_params.build_fep_systems(system_idx, mutant_idx, windows)
-        else:
-            mutant_systems = mutant_params
+        return pos, top, hydrogen_order, h_virt_excep, virt_excep_shift, f_exceptions, [ligand_ghost_atoms, ligand_ghost_exceptions]
 
+    def run_parallel_fep(self, mutant_params, system_idx, mutant_idx, n_steps, n_iterations, windows, return_dg_matrix=False):
+
+        logger.debug('Computing FEP for {}...'.format(self.name))
+
+        mutant_systems = mutant_params.build_fep_systems(system_idx, mutant_idx, windows)
         nstates = len(mutant_systems)
         chunk = math.ceil(nstates / self.num_gpu)
         groups = grouper(range(nstates), chunk)
         pool = Pool(processes=self.num_gpu)
 
         system = copy.deepcopy(self.wt_system)
-        box_vectors = self.input_pdb.topology.getPeriodicBoxVectors()
+        box_vectors = self.extended_pdb.topology.getPeriodicBoxVectors()
         system.setDefaultPeriodicBoxVectors(*box_vectors)
         system.addForce(mm.MonteCarloBarostat(1 * unit.atmospheres, self.temperature * unit.kelvin, 25))###
 
@@ -305,7 +232,7 @@ class FSim(object):
             self.apply_nonbonded_parameters(non_bonded_force, mutant_parameters[0], mutant_parameters[1],
                                             mutant_parameters[2], mutant_parameters[3])
 
-        box_vectors = self.input_pdb.topology.getPeriodicBoxVectors()
+        box_vectors = self.extended_pdb.topology.getPeriodicBoxVectors()
         system.setDefaultPeriodicBoxVectors(*box_vectors)
         system.addForce(mm.MonteCarloBarostat(1 * unit.atmospheres, self.temperature * unit.kelvin, 25))###
 
@@ -345,6 +272,19 @@ class FSim(object):
             data = angle['data']
             force.setAngleParameters(angle_idx, particle_idxs[0], particle_idxs[1], particle_idxs[2], data[0], data[1])
 
+    def mod_params(self, charge, sigma, epsilon, nonbonded_params):
+        if 'charge' in self.param and 'VDW' in self.param or 'all' in self.param:
+            charge, sigma, eps = nonbonded_params
+        elif 'charge' in self.param and 'sigma' in self.param:
+            charge, sigma = nonbonded_params[:2]
+        elif 'charge' in self.param:
+            charge = nonbonded_params[0]
+        elif 'sigma' in self.param:
+            sigma = nonbonded_params[1]
+        else:
+            raise ValueError('Unsupported param selection')
+        return charge, sigma, epsilon
+
     def apply_nonbonded_parameters(self, force, params, ghost_params, excep, ghost_excep):
         #nonbonded
         for i, index in enumerate(self.ligand_info[0]):
@@ -353,94 +293,46 @@ class FSim(object):
             if atom != params[i]['id']+self.offset:
                 raise (ValueError('Fluorify has failed to generate nonbonded parameters(0) correctly please raise '
                                   'this as and issue at https://github.com/adw62/Fluorify'))
+
             charge, sigma, epsilon = force.getParticleParameters(atom)
-            if self.opt:
-                if self.param == 'charge':
-                    force.setParticleParameters(atom, nonbonded_params, sigma, epsilon)
-                elif self.param == 'sigma':
-                    force.setParticleParameters(atom, charge, nonbonded_params, epsilon)
-                else:
-                    raise ValueError('Can only optimize charge only or sigma only please add this as a cmd line option')
-            else:
-                if self.param == 'all':
-                    force.setParticleParameters(atom, nonbonded_params[0], nonbonded_params[1], nonbonded_params[2])
-                elif self.param == 'charge':
-                    force.setParticleParameters(atom, nonbonded_params[0], sigma, epsilon)
-                elif self.param == 'vdw':
-                    force.setParticleParameters(atom, charge, nonbonded_params[1], nonbonded_params[2])
-                elif self.param == 'sigma':
-                    force.setParticleParameters(atom, charge, nonbonded_params[1], epsilon)
-                else:
-                    raise ValueError('Unsupported param selection')
+            charge, sigma, epsilon = FSim.mod_params(self, charge, sigma, epsilon, nonbonded_params)
+            force.setParticleParameters(atom, charge, sigma, epsilon)
 
-
-        #If not an optimization need to change parameters of ghost/dual topology
-        if not self.opt:
-            for i, index in enumerate(self.ghost_ligand_info[0]):
-                atom = int(index)
-                nonbonded_params = ghost_params[i]['data']
-                if atom != int(ghost_params[i]['id']):
-                    raise (ValueError('Fluorify has failed to generate nonbonded parameters(1) correctly please raise '
-                                      'this as and issue at https://github.com/adw62/Fluorify'))
-                charge, sigma, epsilon = force.getParticleParameters(atom)
-                if self.param == 'all':
-                    force.setParticleParameters(atom, nonbonded_params[0], nonbonded_params[1], nonbonded_params[2])
-                elif self.param == 'charge':
-                    force.setParticleParameters(atom, nonbonded_params[0], sigma, epsilon)
-                elif self.param == 'vdw':
-                    force.setParticleParameters(atom, charge, nonbonded_params[1], nonbonded_params[2])
-                elif self.param == 'sigma':
-                    force.setParticleParameters(atom, charge, nonbonded_params[1], epsilon)
-                else:
-                    raise ValueError('Unsupported param selection')
+        #GHOST/dual topo
+        for i, index in enumerate(self.ghost_ligand_info[0]):
+            atom = int(index)
+            nonbonded_params = ghost_params[i]['data']
+            if atom != int(ghost_params[i]['id']):
+                raise (ValueError('Fluorify has failed to generate nonbonded parameters(1) correctly please raise '
+                                  'this as and issue at https://github.com/adw62/Fluorify'))
+            charge, sigma, epsilon = force.getParticleParameters(atom)
+            charge, sigma, epsilon = FSim.mod_params(self, charge, sigma, epsilon, nonbonded_params)
+            force.setParticleParameters(atom, charge, sigma, epsilon)
 
         #exceptions
         for i, index in enumerate(self.ligand_info[1]):
             excep_idx = int(index)
             excep_params = excep[i]['data']
-            [p1, p2, charge_prod, sigma, eps] = force.getExceptionParameters(excep_idx)
+            [p1, p2, charge_prod, sigma, epsilon] = force.getExceptionParameters(excep_idx)
             if frozenset((p1-self.offset, p2-self.offset)) != excep[i]['id']:
                 raise (ValueError('Fluorify has failed to generate nonbonded parameters(2) correctly please raise '
                                   'this as and issue at https://github.com/adw62/Fluorify'))
-            if self.opt:
-                if self.param == 'charge':
-                    force.setExceptionParameters(excep_idx, p1, p2, excep_params, sigma, eps)
-                elif self.param == 'sigma':
-                    force.setExceptionParameters(excep_idx, p1, p2, charge_prod, excep_params, eps)
-                else:
-                    raise ValueError('Can only optimize charge only or sigma only please add this as a cmd line option')
-            else:
-                if self.param == 'all':
-                    force.setExceptionParameters(excep_idx, p1, p2, excep_params[0], excep_params[1], excep_params[2])
-                elif self.param == 'charge':
-                    force.setExceptionParameters(excep_idx, p1, p2, excep_params[0], sigma, eps)
-                elif self.param == 'vdw':
-                    force.setExceptionParameters(excep_idx, p1, p2, charge_prod, excep_params[1], excep_params[2])
-                elif self.param == 'sigma':
-                    force.setExceptionParameters(excep_idx, p1, p2, charge_prod, excep_params[1], eps)
-                else:
-                    raise ValueError('Unsupported param selection')
 
-        # If not an optimization need to change parameters of ghost/dual topology
-        if not self.opt:
-            for i, (index, shift) in enumerate(zip(self.ghost_ligand_info[1], self.virt_excep_shift)):
-                excep_idx = int(index)
-                excep_params = ghost_excep[i]['data']
-                [p1, p2, charge_prod, sigma, eps] = force.getExceptionParameters(excep_idx)
-                # Hinders multi permu (assumption dual is on right)
-                if frozenset((p1-self.offset, p2-shift[1]-self.offset)) != ghost_excep[i]['id']:
-                    raise (ValueError('Fluorify has failed to generate nonbonded parameters(3) correctly please raise '
-                                      'this as and issue at https://github.com/adw62/Fluorify'))
-                if self.param == 'all':
-                    force.setExceptionParameters(excep_idx, p1, p2, excep_params[0], excep_params[1], excep_params[2])
-                elif self.param == 'charge':
-                    force.setExceptionParameters(excep_idx, p1, p2, excep_params[0], sigma, eps)
-                elif self.param == 'vdw':
-                    force.setExceptionParameters(excep_idx, p1, p2, charge_prod, excep_params[1], excep_params[2])
-                elif self.param == 'sigma':
-                    force.setExceptionParameters(excep_idx, p1, p2, charge_prod, excep_params[1], eps)
-                else:
-                    raise ValueError('Unsupported param selection')
+            charge_prod, sigma, epsilon = FSim.mod_params(self, charge_prod, sigma, epsilon, excep_params)
+            force.setExceptionParameters(excep_idx, p1, p2, charge_prod, sigma, epsilon)
+
+        # GHOST/dual topo exceptions
+        for i, (index, shift) in enumerate(zip(self.ghost_ligand_info[1], self.virt_excep_shift)):
+            excep_idx = int(index)
+            excep_params = ghost_excep[i]['data']
+            [p1, p2, charge_prod, sigma, eps] = force.getExceptionParameters(excep_idx)
+            # Hinders multi permu (assumption dual is on right)
+            if frozenset((p1-self.offset, p2-shift[1]-self.offset)) != ghost_excep[i]['id']:
+                raise (ValueError('Fluorify has failed to generate nonbonded parameters(3) correctly please raise '
+                                  'this as and issue at https://github.com/adw62/Fluorify'))
+
+            charge_prod, sigma, epsilon = FSim.mod_params(self, charge_prod, sigma, epsilon, excep_params)
+            force.setExceptionParameters(excep_idx, p1, p2, charge_prod, sigma, epsilon)
 
     def get_mutant_energy(self, parameters, dcd, top, num_frames):
         chunk = math.ceil(len(parameters)/self.num_gpu)

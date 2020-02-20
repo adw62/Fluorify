@@ -91,6 +91,7 @@ class Mutants(object):
                         atom = int(atom-1)
                         transfer_params = copy.deepcopy(mutant_params[atom])
                         transfer_params = transfer_params['data']
+                        #transfer_params = [transfer_params[0], 0.4*nm, 0.12*kj_mol]
                         mutant_params[atom] = {'id': atom, 'data': [0.0*e, 0.26*nm, 0.0*kj_mol]}
                         transfer_index = sys_virt_atoms.index(atom)
                         virt_id = nonbonded_ghosts[i][j][transfer_index]['id']
@@ -291,6 +292,7 @@ class Mutants(object):
                                   interpolated_params[4],
                                   interpolated_params[5],
                                   interpolated_params[6]))
+
         return mutant_systems
 
 
@@ -307,8 +309,6 @@ def unit_linspace(x, y, i):
         raise ValueError('unit1 {} does not match unit2 {}'.format(unit1, unit2))
     if unit1 is None:
         ans = np.linspace(x, y, i)
-        ans = np.floor(ans)
-        ans = [int(x) for x in ans]
         return ans
     else:
         ans = np.linspace(x/unit1, y/unit2, i)
