@@ -222,17 +222,16 @@ class Mol2(object):
 
 
 class MutatedLigand(object):
-    def __init__(self, file_path, mol_name, net_charge, gaff=2, build_from_list=None):
+    def __init__(self, file_path, mol_name, net_charge, gaff=2):
         """A class for extracting parameters from a mutated ligand in a mol2 file.
         file_path: location of ligand file
         mol_name: name of mol file
         """
-        if build_from_list is None:
-            file_name = mol_name+'.mol2'
-            run_ante(file_path, file_name, mol_name, net_charge, gaff)
-            MutatedLigand.create_system(self, file_path, mol_name)
-        else:
-            self.system = build_from_list
+
+        file_name = mol_name+'.mol2'
+        run_ante(file_path, file_name, mol_name, net_charge, gaff)
+        MutatedLigand.create_system(self, file_path, mol_name)
+
 
     def create_system(self, file_path, name):
         parameters_file_path = file_path + name + '.prmtop'
