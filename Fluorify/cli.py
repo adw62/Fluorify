@@ -118,16 +118,10 @@ def main(argv=None):
         if param not in accepted_param:
             raise ValueError('param selected not in accepted params: {}'.format(accepted_param))
     else:
-        param = 'all'
+        param = ['all']
 
-    if param == 'charge':
-        logger.debug('Mutating ligand charges only...')
-    elif param == 'vdw':
-        logger.debug('Mutating ligand VDW only...')
-    elif param == 'sigma':
-        logger.debug('Mutating ligand sigmas only...')
-    else:
-        logger.debug('Mutating all ligand parameters...')
+    for x in param:
+        logger.debug('Mutating {} ligand parameters...'.format(x))
 
     if args['--exclude_dualtopo']:
         exclude_dualtopo = int(args['--exclude_dualtopo'])

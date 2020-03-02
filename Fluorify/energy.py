@@ -41,6 +41,7 @@ class FSim(object):
         self.kT = kB * self.temperature
         kcal = 4.1868 * unit.kilojoules_per_mole
         self.kTtokcal = self.kT/kcal * unit.kilocalories_per_mole
+        self.kTtokcal_unitless = self.kTtokcal/self.kTtokcal.unit
         #Create system from input files
         sim_dir = input_folder + sim_name + '/'
         sim_name = sim_name
@@ -91,9 +92,10 @@ class FSim(object):
         self.wt_system = system
 
     def add_all_virtual(self, system, nonbonded_force, bonded_force, snapshot, ligand_name):
-        return FSim.add_fluorine(self, system, nonbonded_force, snapshot, ligand_name, weight=0.5)
+        # 1.340Ang/1.083Ang -1 = 0.24 for Fluorine
+        return FSim.add_fluorine(self, system, nonbonded_force, snapshot, ligand_name, weight=0.24)
 
-    def add_fluorine(self, system, nonbonded_force, snapshot, ligand_name, weight=0.24):
+    def add_fluorine(self, system, nonbonded_force, snapshot, ligand_name, weight):
         pos = list(snapshot.xyz[0]*10)
         top = self.input_pdb.topology
 
@@ -116,7 +118,7 @@ class FSim(object):
         element = app.element.fluorine
         chain = top.addChain()
         res = top.addResidue('FLU', chain)
-        f_weight = weight #1.340Ang/1.083Ang -1 = 0.24
+
         #f_charge = -0.2463
         #f_sig = 0.3034222854639816
         #f_eps = 0.3481087995050717
@@ -135,7 +137,7 @@ class FSim(object):
             atom_added = nonbonded_force.addParticle(0.0, 1.0, 0.0)
             all_new_atoms.append(atom_added)
             ligand_ghost_atoms.append(atom_added)
-            vs = mm.TwoParticleAverageSite(new_atom[0], new_atom[1], 1+f_weight, -f_weight)
+            vs = mm.TwoParticleAverageSite(new_atom[0], new_atom[1], 1+weight, -weight)
             system.setVirtualSite(atom_added, vs)
             #If ligand is over 1000 atoms there will be repeated names
             top.addAtom('F{}'.format(abs(new_atom[0]) % 1000), element, res)
@@ -175,8 +177,6 @@ class FSim(object):
 
         return pos, top, hydrogen_order, h_virt_excep, virt_excep_shift, f_exceptions, [ligand_ghost_atoms, ligand_ghost_exceptions]
 
-        return pos, top, hydrogen_order, h_virt_excep, virt_excep_shift, f_exceptions, [ligand_ghost_atoms, ligand_ghost_exceptions]
-
     def run_parallel_fep(self, mutant_params, system_idx, mutant_idx, n_steps, n_iterations, windows, return_dg_matrix=False):
 
         logger.debug('Computing FEP for {}...'.format(self.name))
@@ -200,7 +200,7 @@ class FSim(object):
         pool.terminate()
         DeltaF_ij, dDeltaF_ij = FSim.gather_dg(self, u_kln, nstates)
         if return_dg_matrix:
-            return DeltaF_ij, dDeltaF_ij
+            return DeltaF_ij * self.kTtokcal_unitless, dDeltaF_ij * self.kTtokcal_unitless
         else:
             logger.debug("Relative free energy change for {0} = {1} +- {2}"
                          .format(self.name, DeltaF_ij[0, nstates - 1] * self.kTtokcal, dDeltaF_ij[0, nstates - 1] * self.kTtokcal))
@@ -274,7 +274,7 @@ class FSim(object):
 
     def mod_params(self, charge, sigma, epsilon, nonbonded_params):
         if 'charge' in self.param and 'VDW' in self.param or 'all' in self.param:
-            charge, sigma, eps = nonbonded_params
+            charge, sigma, epsilon = nonbonded_params
         elif 'charge' in self.param and 'sigma' in self.param:
             charge, sigma = nonbonded_params[:2]
         elif 'charge' in self.param:
@@ -286,6 +286,8 @@ class FSim(object):
         return charge, sigma, epsilon
 
     def apply_nonbonded_parameters(self, force, params, ghost_params, excep, ghost_excep):
+        #print(params)
+        #print(ghost_params)
         #nonbonded
         for i, index in enumerate(self.ligand_info[0]):
             atom = int(index)
