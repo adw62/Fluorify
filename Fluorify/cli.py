@@ -1,13 +1,10 @@
 #!/usr/local/bin/env python
 
 import os
-import shutil
-import logging
+from simtk import unit
 
-from .fluorify import Fluorify
+from .fluorify import Fluorify, SysBuilder
 from docopt import docopt
-
-logger = logging.getLogger(__name__)
 
 # =============================================================================================
 # COMMAND-LINE INTERFACE
@@ -17,14 +14,14 @@ usage = """
 FLUORIFY
 Usage:
   Fluorify [--output_folder=STRING] [--mol_name=STRING] [--ligand_name=STRING] [--complex_name=STRING] [--solvent_name=STRING]
-            [--yaml_path=STRING] [--c_atom_list=STRING] [--h_atom_list=STRING] [--num_frames=INT] [--net_charge=INT]
+            [--yaml_path=STRING] [--setup_path=STRING] [--c_atom_list=STRING] [--h_atom_list=STRING] [--num_frames=INT] [--net_charge=INT]
             [--gaff_ver=INT] [--equi=INT] [--num_fep=INT] [--auto_select=STRING] [--param=STRING]
             [--num_gpu=INT] [--exclude_dualtopo=BOOL] [--optimize] [--job_type=STRING]...
 """
 
-
 def run_automatic_pipeline(yaml_file_path, complex_name, solvent_name):
     """Run YANK's automatic pipeline."""
+    print('Using YANK system builder')
     from yank.experiment import ExperimentBuilder
     exp_builder = ExperimentBuilder(yaml_file_path)
 
@@ -50,7 +47,6 @@ def run_automatic_pipeline(yaml_file_path, complex_name, solvent_name):
             fluorify_file_path = os.path.join(fluorify_phase_dir, user_phase_name + extension)
             shutil.copyfile(yank_file_path, fluorify_file_path)
 
-
 def main(argv=None):
     args = docopt(usage, argv=argv, options_first=True)
 
@@ -60,49 +56,54 @@ def main(argv=None):
         complex_name = args['--complex_name']
     else:
         complex_name = 'complex'
-        logger.debug(msg.format('complex name', complex_name))
+        print(msg.format('complex name', complex_name))
 
     if args['--solvent_name']:
         solvent_name = args['--solvent_name']
     else:
         solvent_name = 'solvent'
-        logger.debug(msg.format('solvent name', solvent_name))
+        print(msg.format('solvent name', solvent_name))
 
     # Run the setup pipeline.
     if args['--yaml_path']:
+        #Use yank system builder
         run_automatic_pipeline(args['--yaml_path'], complex_name, solvent_name)
+    elif args['--setup_path']:
+        #READ OPTIONS
+        systems = SysBuilder('./input/', './receptor.pdb', './ligand.mol2', 'amber14/protein.ff14SB.xml',
+                             'amber14/spce.xml', './gaff.xml', 0.65 * unit.nanometers, 0.125 * unit.molar)
     else:
-        run_automatic_pipeline('./setup.yaml', complex_name, solvent_name)
+        raise ValueError('No set up script provided. Set setup_path or yaml_path')
 
     if args['--mol_name']:
         mol_name = args['--mol_name']
     else:
         mol_name = 'ligand'
-        logger.debug(msg.format('mol file', mol_name + '.mol2'))
+        print(msg.format('mol file', mol_name + '.mol2'))
 
     if args['--ligand_name']:
         ligand_name = args['--ligand_name']
     else:
         ligand_name = 'MOL'
-        logger.debug(msg.format('ligand residue name', ligand_name))
+        print(msg.format('ligand residue name', ligand_name))
 
     if args['--num_frames']:
         num_frames = int(args['--num_frames'])
     else:
         num_frames = 10000
-        logger.debug(msg.format('number of frames', num_frames))
+        print(msg.format('number of frames', num_frames))
 
     if args['--equi']:
         equi = int(args['--equi'])
     else:
         equi = 250000
-        logger.debug(msg.format('Number of equilibration steps', equi))
+        print(msg.format('Number of equilibration steps', equi))
 
     if args['--net_charge']:
         net_charge = int(args['--net_charge'])
     else:
         net_charge = None
-        logger.debug(msg.format('net charge', net_charge))
+        print(msg.format('net charge', net_charge))
 
     if args['--gaff_ver']:
         gaff_ver = int(args['--gaff_ver'])
@@ -110,7 +111,7 @@ def main(argv=None):
             raise ValueError('Can only use gaff ver. 1 or 2')
     else:
         gaff_ver = 2
-        logger.debug(msg.format('gaff version', gaff_ver))
+        print(msg.format('gaff version', gaff_ver))
 
     if args['--param']:
         param = str(args['--param'])
@@ -121,13 +122,13 @@ def main(argv=None):
         param = ['all']
 
     for x in param:
-        logger.debug('Mutating {} ligand parameters...'.format(x))
+        print('Mutating {} ligand parameters...'.format(x))
 
     if args['--exclude_dualtopo']:
         exclude_dualtopo = int(args['--exclude_dualtopo'])
     else:
         exclude_dualtopo = True
-        logger.debug('Excluding dual topology from seeing itself')
+        print('Excluding dual topology from seeing itself')
 
     if args['--optimize']:
         opt = int(args['--optimize'])
@@ -137,7 +138,7 @@ def main(argv=None):
         raise ValueError('Charge optimisation no longer supported.'
                          ' Please use https://github.com/adw62/Ligand_Charge_Optimiser')
     else:
-        logger.debug('Scanning ligand...')
+        print('Scanning ligand...')
         if args['--c_atom_list']:
             c_atom_list = []
             pairs = args['--c_atom_list']
@@ -191,7 +192,7 @@ def main(argv=None):
                 raise ValueError('Allowed elements {}'.format(allowed_jobs))
         else:
             job_type = 'F'
-            logger.debug(msg.format('job_type', job_type))
+            print(msg.format('job_type', job_type))
 
     if args['--output_folder']:
         output_folder = args['--output_folder']
@@ -211,16 +212,16 @@ def main(argv=None):
         num_gpu = int(args['--num_gpu'])
     else:
         num_gpu = 1
-        logger.debug(msg.format('number of GPUs per node', num_gpu))
+        print(msg.format('number of GPUs per node', num_gpu))
 
     if args['--num_fep']:
         num_fep = args['--num_fep']
     else:
         num_fep = 1
-        logger.debug(msg.format('number of FEP calculations', num_fep))
+        print(msg.format('number of FEP calculations', num_fep))
 
 
     Fluorify(output_folder, mol_name, ligand_name, net_charge, complex_name, solvent_name, job_type, auto_select,
              c_atom_list, h_atom_list, num_frames, param, gaff_ver, num_gpu, num_fep, equi, exclude_dualtopo,
-             opt, o_atom_list)
+             opt, o_atom_list, systems)
 

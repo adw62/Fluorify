@@ -10,10 +10,8 @@ from sys import stdout
 import math
 from functools import partial
 from multiprocess import Pool
-import logging
 from pymbar import MBAR, timeseries
 
-logger = logging.getLogger(__name__)
 
 # CONSTANTS #
 kB = 0.008314472471220214 * unit.kilojoules_per_mole/unit.kelvin
@@ -21,7 +19,7 @@ nm = unit.nanometer
 kj_mol = unit.kilojoules_per_mole
 
 class FSim(object):
-    def __init__(self, ligand_name, sim_name, input_folder, param, num_gpu, offset, opt, exclude_dualtopo,
+    def __init__(self, ligand_name, sim_name, input_folder, param, num_gpu, offset, opt, exclude_dualtopo, system,
                  temperature=300*unit.kelvin, friction=0.3/unit.picosecond, timestep=2.0*unit.femtosecond):
         """ A class for creating OpenMM context from input files and calculating free energy
         change when modifying the parameters of the system in the context.
@@ -46,10 +44,6 @@ class FSim(object):
         sim_name = sim_name
         snapshot = md.load(sim_dir + sim_name + '.pdb')
         self.input_pdb = mm.app.pdbfile.PDBFile(sim_dir + sim_name + '.pdb')
-        parameters_file_path = sim_dir + sim_name + '.prmtop'
-        self.parameters_file = mm.app.AmberPrmtopFile(parameters_file_path)
-        system = self.parameters_file.createSystem(nonbondedMethod=app.PME, nonbondedCutoff=1.1*unit.nanometers,
-                                              constraints=app.HBonds, rigidWater=True, ewaldErrorTolerance=0.0005)
         #seperate forces into sperate groups
         for force_index, force in enumerate(system.getForces()):
             if isinstance(force, mm.NonbondedForce):
@@ -92,7 +86,7 @@ class FSim(object):
 
     def add_all_virtual(self, system, nonbonded_force, bonded_force, snapshot, ligand_name):
         # 1.340Ang/1.083Ang -1 = 0.24 for Fluorine
-        return FSim.add_fluorine(self, system, nonbonded_force, snapshot, ligand_name, weight=0.5)
+        return FSim.add_fluorine(self, system, nonbonded_force, snapshot, ligand_name, weight=0.24)
 
     def add_fluorine(self, system, nonbonded_force, snapshot, ligand_name, weight):
         pos = list(snapshot.xyz[0]*10)
@@ -102,6 +96,7 @@ class FSim(object):
         hydrogen_order = []
         carbons = list(snapshot.topology.select('element C and resname {}'.format(ligand_name)))
         hydrogens = list(snapshot.topology.select('element H and resname {}'.format(ligand_name)))
+
         for index in range(system.getNumConstraints()):
             i, j, r = system.getConstraintParameters(index)
             if i in carbons and j in hydrogens:
@@ -128,6 +123,7 @@ class FSim(object):
         h_exceptions = []
         f_exceptions = []
         all_new_atoms = []
+
         for new_atom in bond_list:
             exceptions = []
             system.addParticle(0.00)
@@ -178,7 +174,7 @@ class FSim(object):
 
     def run_parallel_fep(self, mutant_params, system_idx, mutant_idx, n_steps, n_iterations, windows, return_dg_matrix=False):
 
-        logger.debug('Computing FEP for {}...'.format(self.name))
+        print('Computing FEP for {}...'.format(self.name))
 
         mutant_systems = mutant_params.build_fep_systems(system_idx, mutant_idx, windows)
         nstates = len(mutant_systems)
@@ -201,7 +197,7 @@ class FSim(object):
         if return_dg_matrix:
             return DeltaF_ij * self.kTtokcal, dDeltaF_ij * self.kTtokcal
         else:
-            logger.debug("Relative free energy change for {0} = {1} +- {2}"
+            print("Relative free energy change for {0} = {1} +- {2}"
                          .format(self.name, DeltaF_ij[0, nstates - 1] * self.kTtokcal, dDeltaF_ij[0, nstates - 1] * self.kTtokcal))
             return DeltaF_ij[0, nstates - 1] * self.kTtokcal, dDeltaF_ij[0, nstates - 1] * self.kTtokcal
 
@@ -217,7 +213,7 @@ class FSim(object):
         # Compute free energy differences and statistical uncertainties
         mbar = MBAR(u_kln, N_k)
         [DeltaF_ij, dDeltaF_ij, _] = mbar.getFreeEnergyDifferences()
-        logger.debug("Number of uncorrelated samples per state: {}".format(N_k))
+        print("Number of uncorrelated samples per state: {}".format(N_k))
 
         return DeltaF_ij, dDeltaF_ij
 
@@ -401,9 +397,9 @@ def mutant_energy(idxs, sim, dcd, top, num_frames, all_mutants):
     num_mutants = len(all_mutants)
     for i in idxs:
         if i == int(num_mutants-1):
-           logger.debug('Computing potential for wild type ligand')
+           print('Computing potential for wild type ligand')
         else:
-            logger.debug('Computing potential for mutant {0}/{1} on GPU {2}'.format(i+1, (num_mutants-1), device))
+            print('Computing potential for mutant {0}/{1} on GPU {2}'.format(i+1, (num_mutants-1), device))
         sim.apply_nonbonded_parameters(nonbonded_force, all_mutants[i][0], all_mutants[i][1],
                                        all_mutants[i][2], all_mutants[i][3])
         nonbonded_force.updateParametersInContext(context)
@@ -437,7 +433,7 @@ def run_fep(idxs, sim, system, pdb, n_steps, n_iterations, all_mutants):
         nonbonded_force.updateParametersInContext(context)
     else:
         nonbonded_force = system.getForce(sim.nonbonded_index)
-    logger.debug('Minimizing...')
+    print('Minimizing...')
     mm.LocalEnergyMinimizer.minimize(context)
     temperature = sim.temperature
     context.setVelocitiesToTemperature(temperature)
@@ -449,7 +445,7 @@ def run_fep(idxs, sim, system, pdb, n_steps, n_iterations, all_mutants):
     angle_force = system.getForce(sim.angle_index)
     for k, m_id in enumerate(idxs):
         #m_id, id for mutant
-        logger.debug('Computing potentials for FEP window {0}/{1} on GPU {2}'.format(m_id+1, total_states, device))
+        print('Computing potentials for FEP window {0}/{1} on GPU {2}'.format(m_id+1, total_states, device))
         for iteration in range(n_iterations):
             sim.apply_nonbonded_parameters(nonbonded_force, all_mutants[m_id][0], all_mutants[m_id][1],
                                            all_mutants[m_id][2], all_mutants[m_id][3])
@@ -515,10 +511,10 @@ def run_dynamics(dcd_name, system, sim, equi, n_steps):
     else:
         nonbonded_force = system.getForce(sim.nonbonded_index)
 
-    logger.debug('Minimizing...')
+    print('Minimizing...')
     simulation.minimizeEnergy()
     simulation.context.setVelocitiesToTemperature(temperature)
-    logger.debug('Equilibrating...')
+    print('Equilibrating...')
     simulation.step(equi)
 
     simulation.reporters.append(app.DCDReporter(dcd_name, 2500))
@@ -526,9 +522,9 @@ def run_dynamics(dcd_name, system, sim, equi, n_steps):
     potentialEnergy=True, temperature=True, progress=True, remainingTime=True,
     speed=True, totalSteps=equi+n_steps, separator='\t'))
 
-    logger.debug('Running Production...')
+    print('Running Production...')
     simulation.step(n_steps)
-    logger.debug('Done!')
+    print('Done!')
 
 
 def get_ligand_info(ligand_name, snapshot, nonbonded_force, harmonic_force, torsion_force, angle_force):

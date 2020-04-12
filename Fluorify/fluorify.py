@@ -11,9 +11,10 @@ import mdtraj as md
 import numpy as np
 import shutil
 from simtk import unit
-import logging
 
-logger = logging.getLogger(__name__)
+import openmoltools as moltools
+import parmed as pmd
+import simtk.openmm as mm
 
 #CONSTANTS
 e = unit.elementary_charges
@@ -21,7 +22,7 @@ e = unit.elementary_charges
 class Fluorify(object):
     def __init__(self, output_folder, mol_name, ligand_name, net_charge, complex_name, solvent_name, job_type,
                  auto_select, c_atom_list, h_atom_list, num_frames, param, gaff_ver, num_gpu,
-                 num_fep, equi, exclude_dualtopo, opt, o_atom_list):
+                 num_fep, equi, exclude_dualtopo, opt, o_atom_list, systems):
 
         self.output_folder = output_folder
         self.net_charge = net_charge
@@ -38,13 +39,13 @@ class Fluorify(object):
         solvent_sim_dir = input_folder + solvent_name + '/'
 
         if os.path.isdir(self.output_folder):
-            logger.debug('Output folder {} already exists. '
+            print('Output folder {} already exists. '
                   'Will attempt to skip ligand parametrisation, proceed with caution...'.format(self.output_folder))
         else:
             try:
                 os.makedirs(self.output_folder)
             except:
-                logger.debug('Could not create output folder {}'.format(self.output_folder))
+                print('Could not create output folder {}'.format(self.output_folder))
         shutil.copy2(input_folder+mol_file, self.output_folder)
         self.mol = Mol2()
         try:
@@ -65,17 +66,17 @@ class Fluorify(object):
 
         input_files = input_files[1:3]
         self.complex_offset, self.solvent_offset = get_ligand_offset(input_files, self.mol2_ligand_atoms, ligand_name)
-        logger.debug('Parametrize wild type ligand...')
+        print('Parametrize wild type ligand...')
         wt_ligand = MutatedLigand(file_path=self.output_folder, mol_name=mol_name,
                                   net_charge=self.net_charge, gaff=self.gaff_ver)
 
-        logger.debug('Loading complex and solvent systems...')
+        print('Loading complex and solvent systems...')
 
         #COMPLEX
         self.complex_sys = []
         self.complex_sys.append(FSim(ligand_name=ligand_name, sim_name=complex_name, input_folder=input_folder,
-                                     param=param, num_gpu=num_gpu,
-                                     offset=self.complex_offset, opt=opt, exclude_dualtopo=exclude_dualtopo))
+                                     param=param, num_gpu=num_gpu, offset=self.complex_offset, opt=opt,
+                                     exclude_dualtopo=exclude_dualtopo, system=systems.complex))
         self.complex_sys.append([complex_sim_dir + complex_name + '.dcd'])
         self.complex_sys.append(complex_sim_dir + complex_name + '.pdb')
 
@@ -89,8 +90,8 @@ class Fluorify(object):
         #SOLVENT
         self.solvent_sys = []
         self.solvent_sys.append(FSim(ligand_name=ligand_name, sim_name=solvent_name, input_folder=input_folder,
-                                     param=param, num_gpu=num_gpu,
-                                     offset=self.solvent_offset, opt=opt, exclude_dualtopo=exclude_dualtopo))
+                                     param=param, num_gpu=num_gpu, offset=self.solvent_offset, opt=opt,
+                                     exclude_dualtopo=exclude_dualtopo, system=systems.solvent))
         self.solvent_sys.append([solvent_sim_dir + solvent_name + '.dcd'])
         self.solvent_sys.append(solvent_sim_dir + solvent_name + '.pdb')
         if not os.path.isfile(self.solvent_sys[1][0]):
@@ -116,7 +117,7 @@ class Fluorify(object):
         Create OpenMM systems of ligands from prmtop files.
         Extract ligand parameters from OpenMM systems.
         """
-        logger.debug('Parametrize mutant ligands...')
+        print('Parametrize mutant ligands...')
         t0 = time.time()
 
         mutated_ligands = []
@@ -140,21 +141,21 @@ class Fluorify(object):
         del mutant_parameters
 
         t1 = time.time()
-        logger.debug('Took {} seconds'.format(t1 - t0))
+        print('Took {} seconds'.format(t1 - t0))
 
         """
         Apply ligand charges to OpenMM complex and solvent systems.
         Calculate potential energy of simulation with mutant charges.
         Calculate free energy change from wild type to mutant.
         """
-        logger.debug('Calculating free energies...')
+        print('Calculating free energies...')
         t0 = time.time()
 
 
-        logger.debug('Computing complex potential energies...')
+        print('Computing complex potential energies...')
         complex_free_energy = FSim.treat_phase(self.complex_sys[0], mutant_params.complex_params, self.complex_sys[1],
                                                self.complex_sys[2], self.num_frames)
-        logger.debug('Computing solvent potential energies...')
+        print('Computing solvent potential energies...')
         solvent_free_energy = FSim.treat_phase(self.solvent_sys[0], mutant_params.solvent_params, self.solvent_sys[1],
                                                self.solvent_sys[2], self.num_frames)
 
@@ -170,19 +171,19 @@ class Fluorify(object):
             binding_free_energy = energy - solvent_free_energy[i]
             best_mutants.append([binding_free_energy, atom_names, i])
             '''
-            logger.debug('dGs for molecule{}.mol2 with'
+            print('dGs for molecule{}.mol2 with'
                   ' {} substituted for {} complex dG = {}, solvent dG = {}'.format(str(i), atom_names, self.job_type,
                                                                                    energy, solvent_free_energy[i]))
             '''
-            logger.debug('ddG for molecule{}.mol2 with'
+            print('ddG for molecule{}.mol2 with'
                   ' {} substituted for {} = {}'.format(str(i), atom_names, self.job_type, binding_free_energy))
         best_mutants = sorted(best_mutants)
         t1 = time.time()
-        logger.debug('Took {} seconds'.format(t1 - t0))
+        print('Took {} seconds'.format(t1 - t0))
 
         x_best = min(self.num_fep, len(best_mutants))
 
-        logger.debug('Calculating FEP for {} best mutants...'.format(x_best))
+        print('Calculating FEP for {} best mutants...'.format(x_best))
         t0 = time.time()
         for x in range(x_best):
             complex_dg, complex_error = self.complex_sys[0].run_parallel_fep(mutant_params, 0, best_mutants[x][2],
@@ -191,11 +192,11 @@ class Fluorify(object):
                                                                              20000, 50, 12)
             ddg_fep = complex_dg - solvent_dg
             ddg_error = (complex_error**2+solvent_error**2)**0.5
-            logger.debug('Mutant {}:'.format(best_mutants[x][1]))
-            logger.debug('ddG Fluorine Scanning = {}'.format(best_mutants[x][0]))
-            logger.debug('ddG FEP = {} +- {}'.format(ddg_fep, ddg_error))
+            print('Mutant {}:'.format(best_mutants[x][1]))
+            print('ddG Fluorine Scanning = {}'.format(best_mutants[x][0]))
+            print('ddG FEP = {} +- {}'.format(ddg_fep, ddg_error))
         t1 = time.time()
-        logger.debug('Took {} seconds'.format(t1 - t0))
+        print('Took {} seconds'.format(t1 - t0))
 
     def element_perturbation(self, auto_select, c_atom_list, h_atom_list, o_atom_list):
         """
@@ -259,6 +260,94 @@ class Fluorify(object):
                 mutated_systems.extend(p_mutated_systems)
                 mutations.extend(p_mutations)
         return mutated_systems, mutations
+
+
+class SysBuilder(object):
+    def __init__(self, cwd, protein, ligand, protein_FF, water_FF, gaff_FF, boxPadding, ionicStrength, ligand_charge=0,
+                 gaff=2):
+        print('Using Fluorify system builder...')
+
+        supported_water_modles = ['tip3p', 'tip4p', 'tip4pew', 'spce']
+        for model in supported_water_modles:
+            if model in water_FF:
+                water_model = model
+
+        # make file locations
+        self.protein_file = os.path.join(cwd, protein)
+        self.ligand_file = os.path.join(cwd, ligand)
+
+        prmtop_filename, inpcrd_filename, ligand_xml = SysBuilder.paramaterise_ligand(self, ligand_charge, gaff)
+        position_file = mm.app.AmberInpcrdFile(inpcrd_filename)
+        topology_file = mm.app.AmberPrmtopFile(prmtop_filename)
+
+        FF = mm.app.ForceField(protein_FF, water_FF, gaff_FF, ligand_xml)
+        pdb = mm.app.PDBFile(self.protein_file)
+
+        # Create COMPLEX System
+        # add protein
+        complex = mm.app.Modeller(pdb.topology, pdb.positions)
+        # add ligand
+        complex.add(topology_file.topology, position_file.positions)
+        # solvate system
+        complex.addSolvent(FF, model=water_model, ionicStrength=ionicStrength, neutralize=True, padding=boxPadding)
+        # create openmm system object of complex system
+        self.complex = FF.createSystem(complex.topology, nonbondedMethod=mm.app.PME,
+                                       nonbondedCutoff=1.0 * unit.nanometers, constraints=mm.app.HBonds,
+                                       rigidWater=True, ewaldErrorTolerance=0.0005)
+
+        # Create Solvent system
+        # add ligand
+        solvent = mm.app.Modeller(topology_file.topology, position_file.positions)
+        # solvate system
+        solvent.addSolvent(FF, model=water_model, ionicStrength=ionicStrength, neutralize=True, padding=boxPadding)
+        # create openmm system object of complex system
+        self.solvent = FF.createSystem(solvent.topology, nonbondedMethod=mm.app.PME,
+                                       nonbondedCutoff=1.0 * unit.nanometers, constraints=mm.app.HBonds,
+                                       rigidWater=True, ewaldErrorTolerance=0.0005)
+
+        # Make dirs
+        paths = [os.path.join(cwd, 'complex'), os.path.join(cwd, 'solvent')]
+        for path in paths:
+            try:
+                os.mkdir(path)
+            except OSError:
+                print("Creation of the directory {} failed".format(path))
+            else:
+                print("Successfully created the directory {} ".format(path))
+
+        outfile = open(os.path.join(paths[0], 'complex.pdb'), 'w')
+        mm.app.PDBFile.writeFile(complex.topology, complex.positions, outfile)
+        outfile.close()
+
+        outfile = open(os.path.join(paths[1], 'solvent.pdb'), 'w')
+        mm.app.PDBFile.writeFile(solvent.topology, solvent.positions, outfile)
+        outfile.close()
+
+    def paramaterise_ligand(self, ligand_charge, gaff):
+        if gaff == 1:
+            gaff_version = 'gaff'
+            leaprc = 'leaprc.gaff'
+        elif gaff == 2:
+            gaff_version = 'gaff2'
+            leaprc = 'leaprc.gaff2'
+
+        ligand_name = 'ligand'
+        ligand_xml = "{}.xml".format(ligand_name)
+        #Could use mol2.run_ante
+        new_ligand_file, ligand_frcmod = moltools.amber.run_antechamber(ligand_name, self.ligand_file,
+                                                                        charge_method="bcc",
+                                                                        net_charge=ligand_charge,
+                                                                        gaff_version=gaff_version)
+        prmtop_filename, inpcrd_filename = moltools.amber.run_tleap(ligand_name, new_ligand_file, ligand_frcmod,
+                                                                    leaprc=leaprc)
+
+        # Convert frcmod to XML
+        ff = pmd.openmm.OpenMMParameterSet.from_parameterset(pmd.amber.AmberParameterSet(ligand_frcmod))
+        mol2 = pmd.load_file(new_ligand_file)
+        ff.residues[mol2.name] = mol2
+        ff.write(ligand_xml)
+
+        return prmtop_filename, inpcrd_filename, ligand_xml
 
 
 def atom_selection(atom_list):

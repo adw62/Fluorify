@@ -1,13 +1,11 @@
 #!/usr/bin/env python
 
 from simtk import unit
-import logging
 import copy
 import numpy as np
 import math
 import numbers
 
-logger = logging.getLogger(__name__)
 
 #CONSTANTS
 e = unit.elementary_charges
@@ -93,7 +91,8 @@ class Mutants(object):
                         atom = int(atom-1)
                         transfer_params = copy.deepcopy(mutant_params[atom])
                         transfer_params = transfer_params['data']
-                        mutant_params[atom] = {'id': atom, 'data': [0.0*e, 0.26*nm, 0.0*kj_mol]}
+                        transfer_params = [transfer_params[0], 0.5 * nm, transfer_params[2]]
+                        mutant_params[atom] = {'id': atom, 'data': [0.0 * e, 0.26 * nm, 0.0 * kj_mol]}
                         transfer_index = sys_virt_atoms.index(atom)
                         virt_id = nonbonded_ghosts[i][j][transfer_index]['id']
                         nonbonded_ghosts[i][j][transfer_index] = {'id': virt_id, 'data': transfer_params}
