@@ -41,7 +41,6 @@ class FSim(object):
         self.kT = kB * self.temperature
         kcal = 4.1868 * unit.kilojoules_per_mole
         self.kTtokcal = self.kT/kcal * unit.kilocalories_per_mole
-        self.kTtokcal_unitless = self.kTtokcal/self.kTtokcal.unit
         #Create system from input files
         sim_dir = input_folder + sim_name + '/'
         sim_name = sim_name
@@ -93,7 +92,7 @@ class FSim(object):
 
     def add_all_virtual(self, system, nonbonded_force, bonded_force, snapshot, ligand_name):
         # 1.340Ang/1.083Ang -1 = 0.24 for Fluorine
-        return FSim.add_fluorine(self, system, nonbonded_force, snapshot, ligand_name, weight=0.24)
+        return FSim.add_fluorine(self, system, nonbonded_force, snapshot, ligand_name, weight=0.5)
 
     def add_fluorine(self, system, nonbonded_force, snapshot, ligand_name, weight):
         pos = list(snapshot.xyz[0]*10)
@@ -200,7 +199,7 @@ class FSim(object):
         pool.terminate()
         DeltaF_ij, dDeltaF_ij = FSim.gather_dg(self, u_kln, nstates)
         if return_dg_matrix:
-            return DeltaF_ij * self.kTtokcal_unitless, dDeltaF_ij * self.kTtokcal_unitless
+            return DeltaF_ij * self.kTtokcal, dDeltaF_ij * self.kTtokcal
         else:
             logger.debug("Relative free energy change for {0} = {1} +- {2}"
                          .format(self.name, DeltaF_ij[0, nstates - 1] * self.kTtokcal, dDeltaF_ij[0, nstates - 1] * self.kTtokcal))
@@ -286,8 +285,6 @@ class FSim(object):
         return charge, sigma, epsilon
 
     def apply_nonbonded_parameters(self, force, params, ghost_params, excep, ghost_excep):
-        #print(params)
-        #print(ghost_params)
         #nonbonded
         for i, index in enumerate(self.ligand_info[0]):
             atom = int(index)

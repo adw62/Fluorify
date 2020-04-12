@@ -169,9 +169,11 @@ class Fluorify(object):
                 atom_names.append(self.mol2_ligand_atoms[atom_index])
             binding_free_energy = energy - solvent_free_energy[i]
             best_mutants.append([binding_free_energy, atom_names, i])
+            '''
             logger.debug('dGs for molecule{}.mol2 with'
                   ' {} substituted for {} complex dG = {}, solvent dG = {}'.format(str(i), atom_names, self.job_type,
                                                                                    energy, solvent_free_energy[i]))
+            '''
             logger.debug('ddG for molecule{}.mol2 with'
                   ' {} substituted for {} = {}'.format(str(i), atom_names, self.job_type, binding_free_energy))
         best_mutants = sorted(best_mutants)
