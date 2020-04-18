@@ -8,6 +8,7 @@ import copy
 import numpy as np
 from simtk import unit
 
+
 #CONSTANTS
 e = unit.elementary_charges
 ee = e*e
