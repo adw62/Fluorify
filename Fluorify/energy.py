@@ -183,7 +183,7 @@ class FSim(object):
 
     def run_parallel_fep(self, mutant_params, system_idx, mutant_idx, n_steps, n_iterations, windows, return_dg_matrix=False):
 
-        logger.debug('Computing FEP for {}...'.format(self.name))
+        print('Computing FEP for {}...'.format(self.name))
 
         mutant_systems = mutant_params.build_fep_systems(system_idx, mutant_idx, windows)
         nstates = len(mutant_systems)
@@ -206,7 +206,7 @@ class FSim(object):
         if return_dg_matrix:
             return DeltaF_ij * self.kTtokcal, dDeltaF_ij * self.kTtokcal
         else:
-            logger.debug("Relative free energy change for {0} = {1} +- {2}"
+            print("Relative free energy change for {0} = {1} +- {2}"
                          .format(self.name, DeltaF_ij[0, nstates - 1] * self.kTtokcal, dDeltaF_ij[0, nstates - 1] * self.kTtokcal))
             return DeltaF_ij[0, nstates - 1] * self.kTtokcal, dDeltaF_ij[0, nstates - 1] * self.kTtokcal
 
@@ -442,7 +442,7 @@ def run_fep(idxs, sim, system, pdb, n_steps, n_iterations, all_mutants):
         nonbonded_force.updateParametersInContext(context)
     else:
         nonbonded_force = system.getForce(sim.nonbonded_index)
-    logger.debug('Minimizing...')
+    print('Minimizing...')
     mm.LocalEnergyMinimizer.minimize(context)
     temperature = sim.temperature
     context.setVelocitiesToTemperature(temperature)
@@ -454,7 +454,7 @@ def run_fep(idxs, sim, system, pdb, n_steps, n_iterations, all_mutants):
     angle_force = system.getForce(sim.angle_index)
     for k, m_id in enumerate(idxs):
         #m_id, id for mutant
-        logger.debug('Computing potentials for FEP window {0}/{1} on GPU {2}'.format(m_id+1, total_states, device))
+        print('Computing potentials for FEP window {0}/{1} on GPU {2}'.format(m_id+1, total_states, device))
         for iteration in range(n_iterations):
             sim.apply_nonbonded_parameters(nonbonded_force, all_mutants[m_id][0], all_mutants[m_id][1],
                                            all_mutants[m_id][2], all_mutants[m_id][3])
