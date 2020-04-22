@@ -265,7 +265,14 @@ class Fluorify(object):
 
 class SysBuilder(object):
     def __init__(self, cwd, protein, ligand, protein_FF, water_FF, gaff_FF, boxPadding, ionicStrength, ligand_charge=0,
-                 gaff=2):
+                 gaff=2, using_yank=False):
+
+        if using_yank is True:
+            #if using yank then this class is a dummy and contains nothing
+            self.solvent = None
+            self.complex = None
+            return
+
         print('Using Fluorify system builder...')
 
         supported_water_modles = ['tip3p', 'tip4p', 'tip4pew', 'spce']
