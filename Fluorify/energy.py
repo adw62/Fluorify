@@ -83,12 +83,19 @@ class FSim(object):
 
         self.virt_atom_shift = nonbonded_force.getNumParticles()
 
-        #Add dual topology
-        self.extended_pos, self.extended_top, self.virt_atom_order, self.h_virt_excep, self.virt_excep_shift, self.zero_exceptions,\
-        self.ghost_ligand_info = self.add_all_virtual(system, nonbonded_force, bond_force, snapshot, ligand_name)
-        f = open(sim_dir + sim_name + '.pdb', 'w')
-        mm.app.pdbfile.PDBFile.writeFile(self.extended_top, self.extended_pos, f)
-        f.close()
+        if not self.opt:
+            print('Adding dual topology')
+            #Add dual topology
+            self.extended_pos, self.extended_top, self.virt_atom_order, self.h_virt_excep, self.virt_excep_shift, self.zero_exceptions,\
+            self.ghost_ligand_info = self.add_all_virtual(system, nonbonded_force, bond_force, snapshot, ligand_name)
+            f = open(sim_dir + sim_name + '.pdb', 'w')
+            mm.app.pdbfile.PDBFile.writeFile(self.extended_top, self.extended_pos, f)
+            f.close()
+        else:
+            self.virt_atom_order = []
+            self.h_virt_excep = []
+            self.ghost_ligand_info = [[], []]
+            self.virt_excep_shift = []
 
         self.extended_pdb = mm.app.pdbfile.PDBFile(sim_dir + sim_name + '.pdb')
         self.wt_system = system
@@ -202,6 +209,12 @@ class FSim(object):
         pool.close()
         pool.join()
         pool.terminate()
+
+        u_kln = np.array(u_kln)
+        #catching nans
+        if (u_kln == False).any():
+            return False, False
+
         DeltaF_ij, dDeltaF_ij = FSim.gather_dg(self, u_kln, nstates)
         if return_dg_matrix:
             return DeltaF_ij * self.kTtokcal, dDeltaF_ij * self.kTtokcal
@@ -467,7 +480,12 @@ def run_fep(idxs, sim, system, pdb, n_steps, n_iterations, all_mutants):
                 sim.apply_angle_parameters(angle_force, all_mutants[m_id][6])
                 angle_force.updateParametersInContext(context)
             # Run some dynamics
-            integrator.step(n_steps)
+            try:
+                integrator.step(n_steps)
+            except Exception:
+                #catching nans
+                print('NaN in integration for FEP window {0}/{1} on GPU {2}'.format(m_id+1, total_states, device))
+                return False
             # Compute energies at all alchemical states
             for l, global_mutant in enumerate(all_mutants):
                 sim.apply_nonbonded_parameters(nonbonded_force, global_mutant[0], global_mutant[1],
