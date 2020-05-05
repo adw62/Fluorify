@@ -210,7 +210,7 @@ class FSim(object):
         pool.join()
         pool.terminate()
 
-        #nan trap
+        #catching nans
         for result in u_kln:
             if result is False:
                 return False, False

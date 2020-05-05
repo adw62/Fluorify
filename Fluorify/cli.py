@@ -65,6 +65,21 @@ def main(argv=None):
         solvent_name = 'solvent'
         print(msg.format('solvent name', solvent_name))
 
+
+    if args['--net_charge']:
+        net_charge = int(args['--net_charge'])
+    else:
+        net_charge = None
+        print(msg.format('net charge', net_charge))
+
+    if args['--gaff_ver']:
+        gaff_ver = int(args['--gaff_ver'])
+        if gaff_ver != 1 and gaff_ver != 2:
+            raise ValueError('Can only use gaff ver. 1 or 2')
+    else:
+        gaff_ver = 2
+        print(msg.format('gaff version', gaff_ver))
+
     # Run the setup pipeline.
     if args['--yaml_path']:
         # Use yank system builder
@@ -75,8 +90,10 @@ def main(argv=None):
                              using_yank=True)
     elif args['--setup_path']:
         #READ OPTIONS
+        if net_charge is None:
+            net_charge = 0
         systems = SysBuilder('./input/', './receptor.pdb', './ligand.mol2', 'amber14/protein.ff14SB.xml',
-                             'amber14/spce.xml', './gaff.xml', 1.0 * unit.nanometers, 0.15 * unit.molar)
+                             'amber14/spce.xml', './gaff.xml', 1.0 * unit.nanometers, 0.15 * unit.molar, ligand_charge=net_charge)
     else:
         raise ValueError('No set up script provided. Set setup_path or yaml_path')
 
@@ -103,20 +120,6 @@ def main(argv=None):
     else:
         equi = 250000
         print(msg.format('Number of equilibration steps', equi))
-
-    if args['--net_charge']:
-        net_charge = int(args['--net_charge'])
-    else:
-        net_charge = None
-        print(msg.format('net charge', net_charge))
-
-    if args['--gaff_ver']:
-        gaff_ver = int(args['--gaff_ver'])
-        if gaff_ver != 1 and gaff_ver != 2:
-            raise ValueError('Can only use gaff ver. 1 or 2')
-    else:
-        gaff_ver = 2
-        print(msg.format('gaff version', gaff_ver))
 
     if args['--param']:
         param = str(args['--param'])
