@@ -210,10 +210,10 @@ class FSim(object):
         pool.join()
         pool.terminate()
 
-        u_kln = np.array(u_kln)
-        #catching nans
-        if (u_kln == False).any():
-            return False, False
+        #nan trap
+        for result in u_kln:
+            if result is False:
+                return False, False
 
         DeltaF_ij, dDeltaF_ij = FSim.gather_dg(self, u_kln, nstates)
         if return_dg_matrix:
