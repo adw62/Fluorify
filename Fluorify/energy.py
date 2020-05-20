@@ -188,9 +188,11 @@ class FSim(object):
 
         return pos, top, hydrogen_order, h_virt_excep, virt_excep_shift, f_exceptions, [ligand_ghost_atoms, ligand_ghost_exceptions]
 
-    def run_parallel_fep(self, mutant_params, system_idx, mutant_idx, n_steps, n_iterations, windows, return_dg_matrix=False):
+    def run_parallel_fep(self, mutant_params, system_idx, mutant_idx, n_steps, n_iterations, windows, return_dg_matrix=False, convg=False):
 
         print('Computing FEP for {}...'.format(self.name))
+        if convg is False:
+            convg = [n_iterations]
 
         mutant_systems = mutant_params.build_fep_systems(system_idx, mutant_idx, windows)
         nstates = len(mutant_systems)
@@ -214,17 +216,21 @@ class FSim(object):
         for result in u_kln:
             if result is False:
                 return False, False
+        #remove multi processing data strut
+        u_kln = np.vstack(u_kln)
 
-        DeltaF_ij, dDeltaF_ij = FSim.gather_dg(self, u_kln, nstates)
-        if return_dg_matrix:
-            return DeltaF_ij * self.kTtokcal, dDeltaF_ij * self.kTtokcal
-        else:
-            print("Relative free energy change for {0} = {1} +- {2}"
-                         .format(self.name, DeltaF_ij[0, nstates - 1] * self.kTtokcal, dDeltaF_ij[0, nstates - 1] * self.kTtokcal))
-            return DeltaF_ij[0, nstates - 1] * self.kTtokcal, dDeltaF_ij[0, nstates - 1] * self.kTtokcal
+        for sampling in convg:
+            DeltaF_ij, dDeltaF_ij = FSim.gather_dg(self, u_kln[:, :, :sampling], nstates)
+            if return_dg_matrix:
+                return DeltaF_ij * self.kTtokcal, dDeltaF_ij * self.kTtokcal
+            else:
+                print("Relative free energy change for {0} = {1} +- {2} with {3} iterations"
+                             .format(self.name, DeltaF_ij[0, nstates - 1] * self.kTtokcal,
+                                     dDeltaF_ij[0, nstates - 1] * self.kTtokcal, sampling))
+
+        return DeltaF_ij[0, nstates - 1] * self.kTtokcal, dDeltaF_ij[0, nstates - 1] * self.kTtokcal
 
     def gather_dg(self, u_kln, nstates):
-        u_kln = np.vstack(u_kln)
         # Subsample data to extract uncorrelated equilibrium timeseries
         N_k = np.zeros([nstates], np.int32)  # number of uncorrelated samples
         for k in range(nstates):
