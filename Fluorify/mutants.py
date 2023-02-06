@@ -61,6 +61,7 @@ class Mutants(object):
                                        torsion_params[1],
                                        angle_params[1]))
 
+
         self.all_systems_params = [self.complex_params, self.solvent_params]
 
     def build_nonbonded(self, params, mutations, virt_atoms, atom_order):

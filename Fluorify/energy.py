@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
-import simtk.openmm as mm
-from simtk.openmm import app
+import openmm as mm
+from openmm import app
 from simtk import unit
 import mdtraj as md
 import numpy as np
@@ -203,7 +203,7 @@ class FSim(object):
         system = copy.deepcopy(self.wt_system)
         box_vectors = self.extended_pdb.topology.getPeriodicBoxVectors()
         system.setDefaultPeriodicBoxVectors(*box_vectors)
-        system.addForce(mm.MonteCarloBarostat(1 * unit.atmospheres, self.temperature * unit.kelvin, 25))###
+        system.addForce(mm.MonteCarloBarostat(1 * unit.atmospheres, self.temperature, 25))###
 
         fep = partial(run_fep, sim=self, system=system, pdb=self.extended_pdb,
                       n_steps=n_steps, n_iterations=n_iterations, all_mutants=mutant_systems)
@@ -257,7 +257,7 @@ class FSim(object):
 
         box_vectors = self.extended_pdb.topology.getPeriodicBoxVectors()
         system.setDefaultPeriodicBoxVectors(*box_vectors)
-        system.addForce(mm.MonteCarloBarostat(1 * unit.atmospheres, self.temperature * unit.kelvin, 25))###
+        system.addForce(mm.MonteCarloBarostat(1 * unit.atmospheres, self.temperature, 25))###
 
         dcd_names = [output_folder+name+'_gpu'+str(i)+'.dcd' for i in range(self.num_gpu)]
         groups = grouper(dcd_names, 1)
@@ -412,13 +412,15 @@ def mutant_energy(idxs, sim, dcd, top, num_frames, all_mutants):
     device = idxs[1]
     idxs = idxs[0]
     system = copy.deepcopy(sim.wt_system)
-    context, integrator = sim.build_context(system, device=device)
-    del integrator
+
     if not sim.opt:
         nonbonded_force = FSim.zero_ghost_exceptions(sim, system)
-        nonbonded_force.updateParametersInContext(context)
     else:
         nonbonded_force = system.getForce(sim.nonbonded_index)
+
+    context, integrator = sim.build_context(system, device=device)
+    del integrator
+
     harmonic_force = system.getForce(sim.harmonic_index)
     torsion_force = system.getForce(sim.torsion_index)
     angle_force = system.getForce(sim.angle_index)
@@ -430,6 +432,7 @@ def mutant_energy(idxs, sim, dcd, top, num_frames, all_mutants):
             print('Computing potential for mutant {0}/{1} on GPU {2}'.format(i+1, (num_mutants-1), device))
         sim.apply_nonbonded_parameters(nonbonded_force, all_mutants[i][0], all_mutants[i][1],
                                        all_mutants[i][2], all_mutants[i][3])
+        context.reinitialize(True)
         nonbonded_force.updateParametersInContext(context)
         if not sim.opt:
             sim.apply_bonded_parameters(harmonic_force, all_mutants[i][4])
@@ -454,13 +457,15 @@ def mutant_energy(idxs, sim, dcd, top, num_frames, all_mutants):
 def run_fep(idxs, sim, system, pdb, n_steps, n_iterations, all_mutants):
     device = idxs[1]
     idxs = idxs[0]
-    context, integrator = sim.build_context(system, device)
-    context.setPositions(pdb.positions)
+
     if not sim.opt:
         nonbonded_force = FSim.zero_ghost_exceptions(sim, system)
-        nonbonded_force.updateParametersInContext(context)
     else:
         nonbonded_force = system.getForce(sim.nonbonded_index)
+
+    context, integrator = sim.build_context(system, device)
+    context.setPositions(pdb.positions)
+
     print('Minimizing...')
     mm.LocalEnergyMinimizer.minimize(context)
     temperature = sim.temperature
@@ -477,6 +482,7 @@ def run_fep(idxs, sim, system, pdb, n_steps, n_iterations, all_mutants):
         for iteration in range(n_iterations):
             sim.apply_nonbonded_parameters(nonbonded_force, all_mutants[m_id][0], all_mutants[m_id][1],
                                            all_mutants[m_id][2], all_mutants[m_id][3])
+            context.reinitialize(True)
             nonbonded_force.updateParametersInContext(context)
             if not sim.opt:
                 sim.apply_bonded_parameters(harmonic_force, all_mutants[m_id][4])
@@ -496,6 +502,7 @@ def run_fep(idxs, sim, system, pdb, n_steps, n_iterations, all_mutants):
             for l, global_mutant in enumerate(all_mutants):
                 sim.apply_nonbonded_parameters(nonbonded_force, global_mutant[0], global_mutant[1],
                                                global_mutant[2], global_mutant[3])
+                context.reinitialize(True)
                 nonbonded_force.updateParametersInContext(context)
                 if not sim.opt:
                     sim.apply_bonded_parameters(harmonic_force, global_mutant[4])
@@ -530,19 +537,18 @@ def run_dynamics(dcd_name, system, sim, equi, n_steps):
     integrator = mm.LangevinIntegrator(temperature, friction, timestep)
     integrator.setConstraintTolerance(0.00001)
 
+    #zero ghost exceptions
+    if not sim.opt:
+        nonbonded_force = FSim.zero_ghost_exceptions(sim, system)
+    else:
+        nonbonded_force = system.getForce(sim.nonbonded_index)
+
     platform = mm.Platform.getPlatformByName('CUDA')
     device = dcd_name[1]
     dcd_name = dcd_name[0][0]
     properties = {'CudaPrecision': 'mixed', 'CudaDeviceIndex': device}
     simulation = app.Simulation(pdb.topology, system, integrator, platform, properties)
     simulation.context.setPositions(pdb.positions)
-
-    #zero ghost exceptions
-    if not sim.opt:
-        nonbonded_force = FSim.zero_ghost_exceptions(sim, system)
-        nonbonded_force.updateParametersInContext(simulation.context)
-    else:
-        nonbonded_force = system.getForce(sim.nonbonded_index)
 
     print('Minimizing...')
     simulation.minimizeEnergy()

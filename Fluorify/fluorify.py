@@ -24,6 +24,29 @@ class Fluorify(object):
     def __init__(self, output_folder, mol_name, ligand_name, net_charge, complex_name, solvent_name, job_type,
                  auto_select, c_atom_list, h_atom_list, num_frames, param, gaff_ver, num_gpu,
                  num_fep, equi, exclude_dualtopo, opt, o_atom_list, systems):
+        """
+
+        :param output_folder: STRING, path to output folder.
+        :param mol_name: STRING, name of ligand mol2 file.
+        :param ligand_name: STRING, name of ligand resname.
+        :param net_charge: INT, value for ligand netcharge.
+        :param complex_name: STRING, name for complex system.
+        :param solvent_name: STRING, name for solvent system.
+        :param job_type: STRING,
+        :param auto_select:
+        :param c_atom_list:
+        :param h_atom_list:
+        :param num_frames:
+        :param param:
+        :param gaff_ver:
+        :param num_gpu:
+        :param num_fep:
+        :param equi:
+        :param exclude_dualtopo:
+        :param opt:
+        :param o_atom_list:
+        :param systems:
+        """
 
         self.output_folder = output_folder
         self.net_charge = net_charge
@@ -60,10 +83,10 @@ class Fluorify(object):
         self.mol2_ligand_atoms, complex_ligand_atoms, solvent_ligand_atoms = get_atom_list(input_files, ligand_name)
         if self.mol2_ligand_atoms != complex_ligand_atoms:
             raise ValueError('Names and or name casing and or atom order of ligand not matched across input files.'
-                             'Charges will not be applied where expected')
+                             'Parameters will not be applied where expected')
         if complex_ligand_atoms != solvent_ligand_atoms:
             raise ValueError('Names and or name casing and or atom order of ligand not matched across input files.'
-                             'Charges will not be applied where expected')
+                             'Parameters will not be applied where expected')
 
         input_files = input_files[1:3]
         self.complex_offset, self.solvent_offset = get_ligand_offset(input_files, self.mol2_ligand_atoms, ligand_name)
@@ -87,7 +110,6 @@ class Fluorify(object):
                 if not os.path.isfile(name):
                     self.complex_sys[1] = self.complex_sys[0].run_parallel_dynamics(complex_sim_dir, complex_name,
                                                                                     self.num_frames, equi, None)
-                    break
         #SOLVENT
         self.solvent_sys = []
         self.solvent_sys.append(FSim(ligand_name=ligand_name, sim_name=solvent_name, input_folder=input_folder,
@@ -101,12 +123,18 @@ class Fluorify(object):
                 if not os.path.isfile(name):
                     self.solvent_sys[1] = self.solvent_sys[0].run_parallel_dynamics(solvent_sim_dir, solvent_name,
                                                                                     self.num_frames, equi, None)
-                    break
 
         Fluorify.scanning(self, wt_ligand, auto_select, c_atom_list, h_atom_list, o_atom_list)
 
     def scanning(self, wt_ligand, auto_select, c_atom_list, h_atom_list, o_atom_list):
-        """preparation and running scanning analysis
+        """
+
+        :param wt_ligand:
+        :param auto_select:
+        :param c_atom_list:
+        :param h_atom_list:
+        :param o_atom_list:
+        :return:
         """
 
         #Generate mutant systems with selected pertibations
